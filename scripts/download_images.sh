@@ -80,6 +80,120 @@ verify_file() {
     fi
 }
 
+# Function to get latest Home Assistant OS release for RPi5
+get_latest_haos_release() {
+    local api_url="https://api.github.com/repos/home-assistant/operating-system/releases/latest"
+    
+    print_status "Fetching latest Home Assistant OS release..." >&2
+    
+    local release_data
+    if ! release_data=$(curl -s "$api_url"); then
+        print_error "Failed to fetch Home Assistant OS release information" >&2
+        return 1
+    fi
+    
+    local download_url
+    download_url=$(echo "$release_data" | jq -r '.assets[] | select(.name | test("haos_rpi5-64-.*\\.img\\.xz$")) | .browser_download_url')
+    
+    if [[ -z "$download_url" || "$download_url" == "null" ]]; then
+        print_error "Could not find RPi5 image in latest release" >&2
+        return 1
+    fi
+    
+    local filename
+    filename=$(basename "$download_url")
+    
+    printf "%s|%s" "$download_url" "$filename"
+}
+
+# Function to get latest Ubuntu Server release for RPi
+get_latest_ubuntu_release() {
+    # Ubuntu releases follow a predictable pattern for current/latest versions
+    local ubuntu_base_url="https://cdimage.ubuntu.com/releases/25.04/release"
+    local filename_pattern="ubuntu-25.04-preinstalled-server-arm64+raspi.img.xz"
+    
+    print_status "Checking for Ubuntu Server 25.04 release..." >&2
+    
+    # Check if the file exists at the expected URL
+    local download_url="$ubuntu_base_url/$filename_pattern"
+    
+    # Test if URL is accessible
+    if curl -s --head "$download_url" | head -n 1 | grep -q "200 OK"; then
+        printf "%s|%s" "$download_url" "$filename_pattern"
+        return 0
+    else
+        print_warning "Ubuntu 25.04 not found, trying 24.04 LTS..." >&2
+        # Fallback to 24.04 LTS
+        local lts_url="https://cdimage.ubuntu.com/releases/24.04/release"
+        local lts_filename="ubuntu-24.04-preinstalled-server-arm64+raspi.img.xz"
+        local lts_download_url="$lts_url/$lts_filename"
+        
+        if curl -s --head "$lts_download_url" | head -n 1 | grep -q "200 OK"; then
+            printf "%s|%s" "$lts_download_url" "$lts_filename"
+            return 0
+        else
+            print_error "Could not find Ubuntu Server image" >&2
+            return 1
+        fi
+    fi
+}
+
+# Function to download Home Assistant OS
+download_haos() {
+    local release_info
+    if ! release_info=$(get_latest_haos_release); then
+        print_error "Failed to get Home Assistant OS release information"
+        return 1
+    fi
+    
+    local download_url
+    local filename
+    IFS='|' read -r download_url filename <<< "$release_info"
+    
+    if [[ -z "$download_url" || -z "$filename" ]]; then
+        print_error "Failed to parse Home Assistant OS release information"
+        print_error "Release info: $release_info"
+        return 1
+    fi
+    
+    print_status "Found Home Assistant OS: $filename"
+    
+    if download_file "$download_url" "$filename"; then
+        print_status "Home Assistant OS downloaded successfully"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to download Ubuntu Server
+download_ubuntu() {
+    local release_info
+    if ! release_info=$(get_latest_ubuntu_release); then
+        print_error "Failed to get Ubuntu Server release information"
+        return 1
+    fi
+    
+    local download_url
+    local filename
+    IFS='|' read -r download_url filename <<< "$release_info"
+    
+    if [[ -z "$download_url" || -z "$filename" ]]; then
+        print_error "Failed to parse Ubuntu Server release information"
+        print_error "Release info: $release_info"
+        return 1
+    fi
+    
+    print_status "Found Ubuntu Server: $filename"
+    
+    if download_file "$download_url" "$filename"; then
+        print_status "Ubuntu Server downloaded successfully"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Main function
 main() {
     print_status "Pi 5 OS Image Downloader"
@@ -99,33 +213,94 @@ main() {
         exit 1
     fi
     
-    # Copy existing images from home directory if they exist
-    if [[ -d "$HOME/images4rpi" ]]; then
-        print_status "Copying existing images from ~/images4rpi..."
-        cp -n "$HOME/images4rpi"/*.img.xz "$IMAGES_DIR/" 2>/dev/null || true
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is required but not installed. Please install it first."
+        print_error "Install with: brew install jq"
+        exit 1
     fi
     
-    print_status "Image download locations:"
+    print_status "Available download options:"
     echo "  - Home Assistant OS: https://github.com/home-assistant/operating-system/releases"
     echo "  - Ubuntu Server: https://ubuntu.com/download/raspberry-pi"
     echo ""
-    print_warning "Automatic downloads not yet implemented."
-    print_warning "Please manually download the following files to $IMAGES_DIR:"
-    echo ""
-    echo "Home Assistant OS:"
-    echo "  - haos_rpi5-64-16.0.img.xz (or latest version)"
-    echo "  - Download from: https://github.com/home-assistant/operating-system/releases"
-    echo ""
-    echo "Ubuntu Server:"
-    echo "  - ubuntu-25.04-preinstalled-server-arm64+raspi.img.xz (or latest version)"
-    echo "  - Download from: https://ubuntu.com/download/raspberry-pi"
-    echo ""
     
-    # TODO: Implement automatic downloads
-    # This would require:
-    # 1. Parsing GitHub API for latest Home Assistant OS releases
-    # 2. Parsing Ubuntu's download page for latest image URLs
-    # 3. Handling version selection and checksums
+    # Parse command line arguments
+    local download_haos=false
+    local download_ubuntu=false
+    local auto_download=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --haos)
+                download_haos=true
+                shift
+                ;;
+            --ubuntu)
+                download_ubuntu=true
+                shift
+                ;;
+            --all)
+                download_haos=true
+                download_ubuntu=true
+                shift
+                ;;
+            --auto)
+                auto_download=true
+                download_haos=true
+                download_ubuntu=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Usage: $0 [--haos] [--ubuntu] [--all] [--auto]"
+                echo "  --haos    Download Home Assistant OS only"
+                echo "  --ubuntu  Download Ubuntu Server only"
+                echo "  --all     Download both images"
+                echo "  --auto    Download both images automatically (no prompts)"
+                exit 1
+                ;;
+        esac
+    done
+    
+    # If no specific downloads requested, show manual instructions
+    if [[ "$download_haos" == false && "$download_ubuntu" == false ]]; then
+        print_warning "No automatic downloads requested."
+        print_warning "Please manually download the following files to $IMAGES_DIR:"
+        echo ""
+        echo "Home Assistant OS:"
+        echo "  - haos_rpi5-64-16.0.img.xz (or latest version)"
+        echo "  - Download from: https://github.com/home-assistant/operating-system/releases"
+        echo ""
+        echo "Ubuntu Server:"
+        echo "  - ubuntu-25.04-preinstalled-server-arm64+raspi.img.xz (or latest version)"
+        echo "  - Download from: https://ubuntu.com/download/raspberry-pi"
+        echo ""
+        echo "Or run with options:"
+        echo "  $0 --haos      # Download Home Assistant OS only"
+        echo "  $0 --ubuntu    # Download Ubuntu Server only"
+        echo "  $0 --all       # Download both images"
+        echo "  $0 --auto      # Download both images automatically"
+    else
+        # Perform automatic downloads
+        local download_success=true
+        
+        if [[ "$download_haos" == true ]]; then
+            if ! download_haos; then
+                download_success=false
+            fi
+        fi
+        
+        if [[ "$download_ubuntu" == true ]]; then
+            if ! download_ubuntu; then
+                download_success=false
+            fi
+        fi
+        
+        if [[ "$download_success" == false ]]; then
+            print_error "Some downloads failed. Please check the errors above."
+            exit 1
+        fi
+    fi
     
     # For now, just show what's already available
     print_status "Currently available images:"
