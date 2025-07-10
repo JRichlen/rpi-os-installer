@@ -78,3 +78,10 @@ pids
 *.sw?
 
 dist/
+
+# Testing environment files
+qemu_test/
+Dockerfile.test
+test_*.img
+test_*.qcow2
+*.test

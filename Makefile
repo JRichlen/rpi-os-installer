@@ -1,6 +1,6 @@
 # Pi 5 Installer Makefile
 
-.PHONY: help setup generate install clean download-images check-deps
+.PHONY: help setup generate install clean download-images check-deps test-setup test-qemu test-qemu-interactive test-qemu-clean test-docker test-docker-interactive test-docker-clean validate
 
 # Default target
 help:
@@ -13,6 +13,16 @@ help:
 	@echo "  install        - Create installer media"
 	@echo "  clean          - Clean work directory"
 	@echo "  all            - Run complete workflow (generate + install)"
+	@echo ""
+	@echo "Testing Commands:"
+	@echo "  test-setup     - Run project setup tests"
+	@echo "  validate       - Validate testing setup and capabilities"
+	@echo "  test-qemu      - Setup QEMU for Pi simulation testing"
+	@echo "  test-qemu-interactive - Run interactive QEMU Pi simulation"
+	@echo "  test-qemu-clean - Clean QEMU test environment"
+	@echo "  test-docker    - Setup Docker ARM64 testing environment"
+	@echo "  test-docker-interactive - Run interactive Docker Pi simulation"
+	@echo "  test-docker-clean - Clean Docker test environment"
 
 # Check dependencies
 check-deps:
@@ -56,3 +66,39 @@ status:
 	@echo ""
 	@echo "Available images:"
 	@ls -1 images4rpi/*.img.xz 2>/dev/null || echo "  No images found"
+
+# Testing targets
+test-setup:
+	@echo "Running setup tests..."
+	@scripts/test_setup.sh
+
+# QEMU testing targets
+test-qemu:
+	@echo "Setting up QEMU Pi simulation environment..."
+	@scripts/test_qemu_rpi.sh setup
+
+test-qemu-interactive:
+	@echo "Running interactive QEMU Pi simulation..."
+	@scripts/test_qemu_rpi.sh interactive
+
+test-qemu-clean:
+	@echo "Cleaning QEMU test environment..."
+	@scripts/test_qemu_rpi.sh clean
+
+# Docker testing targets
+test-docker:
+	@echo "Setting up Docker ARM64 testing environment..."
+	@scripts/test_docker_rpi.sh setup
+
+test-docker-interactive:
+	@echo "Running interactive Docker Pi simulation..."
+	@scripts/test_docker_rpi.sh run
+
+test-docker-clean:
+	@echo "Cleaning Docker test environment..."
+	@scripts/test_docker_rpi.sh clean
+
+# Test validation
+validate:
+	@echo "Validating testing setup..."
+	@scripts/validate_tests.sh

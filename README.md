@@ -122,3 +122,36 @@ rpi-os-installer/
 - Verify the external disk has a FAT32 partition
 - Check that required tools are installed via Homebrew
 - Confirm OS images are valid *.img.xz files
+
+## Testing
+
+You can test your installer locally without physical Pi hardware using several methods:
+
+### Quick Testing (Recommended for Development)
+```bash
+# Test project setup and scripts
+make test-setup
+```
+
+### QEMU Pi Simulation (Most Realistic)
+```bash
+# Setup QEMU Pi 5 emulation
+make test-qemu
+
+# Run interactive Pi simulation
+make test-qemu-interactive
+
+# Test specific OS image
+./scripts/test_qemu_rpi.sh test-os haos_rpi5-64-16.0.img.xz
+```
+
+### Docker ARM64 Testing (Fast ARM64 Environment)
+```bash
+# Setup Docker ARM64 environment
+make test-docker
+
+# Run interactive ARM64 testing
+make test-docker-interactive
+```
+
+See [TESTING.md](TESTING.md) for detailed testing instructions and workflows.
