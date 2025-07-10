@@ -36,6 +36,28 @@ print_step() {
     echo -e "${BLUE}[STEP]${NC} $1" >&2
 }
 
+# Function to prompt user directly to terminal
+prompt_user() {
+    if [[ -t 0 ]]; then
+        echo "$1" > /dev/tty
+    else
+        echo "$1" >&2
+    fi
+}
+
+# Function to read user input directly from terminal
+read_user_input() {
+    local prompt="$1"
+    local var_name="$2"
+    if [[ -t 0 ]]; then
+        echo -n "$prompt" > /dev/tty
+        read -r "$var_name" < /dev/tty
+    else
+        echo -n "$prompt" >&2
+        read -r "$var_name" <&0
+    fi
+}
+
 # Function to check and install required tools
 check_dependencies() {
     print_step "Checking dependencies..."
@@ -170,11 +192,17 @@ mount_installer_partition() {
 select_os_image() {
     print_step "Selecting OS image..."
     
+    # Check if images directory exists
+    if [[ ! -d "$IMAGES_DIR" ]]; then
+        print_error "Images directory not found: $IMAGES_DIR"
+        exit 1
+    fi
+    
     # Find all *.img.xz files
     local image_files=()
     while IFS= read -r -d '' file; do
         image_files+=("$file")
-    done < <(find "$IMAGES_DIR" -name "*.img.xz" -type f -print0)
+    done < <(find "$IMAGES_DIR" -name "*.img.xz" -type f -print0 2>/dev/null)
     
     if [[ ${#image_files[@]} -eq 0 ]]; then
         print_error "No *.img.xz files found in $IMAGES_DIR"
@@ -184,20 +212,19 @@ select_os_image() {
     
     # If only one image, use it
     if [[ ${#image_files[@]} -eq 1 ]]; then
-    local selected_image="${image_files[0]}"
-    print_status "Using single available image: $(basename "$selected_image")"
-    echo "$selected_image"
-    return
+        local selected_image="${image_files[0]}"
+        print_status "Using single available image: $(basename "$selected_image")"
+        echo "$selected_image"
+        return
     fi
     
     # Multiple images - prompt user
-    echo "Available OS images:"
+    prompt_user "Available OS images:"
     for i in "${!image_files[@]}"; do
-        echo "  $((i+1)). $(basename "${image_files[$i]}")"
+        prompt_user "  $((i+1)). $(basename "${image_files[$i]}")"
     done
     
-    echo -n "Select image (1-${#image_files[@]}): "
-    read -r selection
+    read_user_input "Select image (1-${#image_files[@]}): " selection
     
     # Validate selection
     if ! [[ "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#image_files[@]} ]]; then
@@ -225,9 +252,15 @@ handle_tailscale_key() {
     
     # Prompt for key
     print_status "Tailscale key not found. Please enter your auth key:"
-    echo -n "Auth key: "
-    read -r -s auth_key
-    echo
+    if [[ -t 0 ]]; then
+        echo -n "Auth key: " > /dev/tty
+        read -r -s auth_key < /dev/tty
+        echo > /dev/tty
+    else
+        echo -n "Auth key: " >&2
+        read -r -s auth_key <&0
+        echo >&2
+    fi
     
     if [[ -z "$auth_key" ]]; then
         print_error "Auth key cannot be empty"
@@ -246,6 +279,7 @@ handle_tailscale_key() {
 # Function to setup bootloader
 setup_bootloader() {
     local mount_point="$1"
+    local partition="$2"
     
     print_step "Setting up bootloader..."
     
@@ -259,7 +293,38 @@ setup_bootloader() {
     
     # Copy boot files
     print_status "Copying boot files..."
-    cp -r "$firmware_dir/boot"/* "$mount_point/"
+    
+    # Check if mount point still exists and is mounted
+    if [[ ! -d "$mount_point" ]]; then
+        print_warning "Mount point $mount_point no longer exists, trying to find new mount point..."
+        # Try to find where it's mounted now
+        local new_mount_point
+        new_mount_point=$(diskutil info "$partition" | grep "Mount Point" | awk '{print $3}')
+        if [[ -n "$new_mount_point" && "$new_mount_point" != "Not" ]]; then
+            print_status "Found new mount point: $new_mount_point"
+            mount_point="$new_mount_point"
+        else
+            print_error "Could not find mount point for $partition"
+            exit 1
+        fi
+    fi
+    
+    if ! mountpoint -q "$mount_point" 2>/dev/null; then
+        print_warning "Mount point $mount_point is no longer mounted, attempting to remount..."
+        # Try to remount
+        if ! diskutil mount -mountPoint "$mount_point" "$partition" 2>/dev/null; then
+            print_error "Failed to remount partition"
+            exit 1
+        fi
+        print_status "Successfully remounted partition"
+    fi
+    
+    # Copy boot files with error handling
+    if ! cp -r "$firmware_dir/boot"/* "$mount_point/"; then
+        print_error "Failed to copy boot files to $mount_point"
+        print_error "Please check if the device is still mounted and accessible"
+        exit 1
+    fi
     
     # Create Pi 5 specific config.txt
     print_status "Creating config.txt..."
@@ -555,7 +620,7 @@ main() {
     tailscale_key_file=$(handle_tailscale_key)
     
     # Setup bootloader
-    setup_bootloader "$mount_point"
+    setup_bootloader "$mount_point" "$partition"
     
     # Build initramfs
     local initramfs_file
