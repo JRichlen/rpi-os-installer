@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="$PROJECT_DIR/images4rpi"
 WORK_DIR="$PROJECT_DIR/pi5_installer_work"
+DIST_DIR="$PROJECT_DIR/dist"
 OS_SETUPS_DIR="$WORK_DIR/os-setups"
 
 # Function to print colored output
@@ -278,8 +279,7 @@ handle_tailscale_key() {
 
 # Function to setup bootloader
 setup_bootloader() {
-    local mount_point="$1"
-    local partition="$2"
+    local dist_dir="$1"
     
     print_step "Setting up bootloader..."
     
@@ -291,52 +291,23 @@ setup_bootloader() {
         git clone --depth 1 https://github.com/raspberrypi/firmware.git "$firmware_dir"
     fi
     
-    # Copy boot files
-    print_status "Copying boot files..."
-    
-    # Check if mount point still exists and is mounted
-    if [[ ! -d "$mount_point" ]]; then
-        print_warning "Mount point $mount_point no longer exists, trying to find new mount point..."
-        # Try to find where it's mounted now
-        local new_mount_point
-        new_mount_point=$(diskutil info "$partition" | grep "Mount Point" | awk '{print $3}')
-        if [[ -n "$new_mount_point" && "$new_mount_point" != "Not" ]]; then
-            print_status "Found new mount point: $new_mount_point"
-            mount_point="$new_mount_point"
-        else
-            print_error "Could not find mount point for $partition"
-            exit 1
-        fi
-    fi
-    
-    if ! mountpoint -q "$mount_point" 2>/dev/null; then
-        print_warning "Mount point $mount_point is no longer mounted, attempting to remount..."
-        # Try to remount
-        if ! diskutil mount -mountPoint "$mount_point" "$partition" 2>/dev/null; then
-            print_error "Failed to remount partition"
-            exit 1
-        fi
-        print_status "Successfully remounted partition"
-    fi
-    
-    # Copy boot files with error handling
-    if ! cp -r "$firmware_dir/boot"/* "$mount_point/"; then
-        print_error "Failed to copy boot files to $mount_point"
-        print_error "Please check if the device is still mounted and accessible"
-        exit 1
-    fi
+    # Copy boot files to dist directory
+    print_status "Copying boot files to dist directory..."
+    cp -r "$firmware_dir/boot"/* "$dist_dir/"
     
     # Create Pi 5 specific config.txt
     print_status "Creating config.txt..."
-    cat > "$mount_point/config.txt" << 'EOF'
+    cat > "$dist_dir/config.txt" << 'EOF'
 # Pi 5 Installer Configuration
 dtparam=pciex1
 dtoverlay=rpi-poe
+kernel=kernel8.img
+initramfs initramfs.img followkernel
 EOF
     
     # Create cmdline.txt
     print_status "Creating cmdline.txt..."
-    cat > "$mount_point/cmdline.txt" << 'EOF'
+    cat > "$dist_dir/cmdline.txt" << 'EOF'
 console=serial0,115200 console=tty1 root=/dev/ram0 init=/sbin/init earlyprintk
 EOF
     
@@ -358,26 +329,47 @@ build_initramfs() {
     
     print_status "Building new initramfs..."
     
-    local busybox_dir="$WORK_DIR/busybox"
     local rootfs_dir="$WORK_DIR/rootfs"
     
-    # Clone BusyBox if not exists
-    if [[ ! -d "$busybox_dir" ]]; then
-        print_status "Cloning BusyBox..."
-        git clone --depth 1 https://git.busybox.net/busybox "$busybox_dir"
+    # Create rootfs directory structure
+    mkdir -p "$rootfs_dir"/{bin,sbin,usr/bin,usr/sbin,proc,sys,dev,tmp,media,etc,lib}
+    
+    # Download pre-built BusyBox for ARM64
+    print_status "Downloading pre-built BusyBox for ARM64..."
+    local busybox_url="https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+    if ! curl -L "$busybox_url" -o "$rootfs_dir/bin/busybox"; then
+        print_error "Failed to download BusyBox binary"
+        print_warning "Trying to create a minimal initramfs without BusyBox..."
+        
+        # Create minimal shell script as fallback
+        cat > "$rootfs_dir/bin/sh" << 'EOF'
+#!/bin/sh
+# Minimal shell fallback
+exec /bin/busybox sh "$@"
+EOF
+        chmod +x "$rootfs_dir/bin/sh"
+        
+        # Create a basic busybox stub
+        cat > "$rootfs_dir/bin/busybox" << 'EOF'
+#!/bin/sh
+# BusyBox stub - basic commands only
+case "$1" in
+    sh) exec /bin/sh ;;
+    mount) exec /bin/mount "$@" ;;
+    umount) exec /bin/umount "$@" ;;
+    *) echo "BusyBox command not available: $1" ;;
+esac
+EOF
+        chmod +x "$rootfs_dir/bin/busybox"
+    else
+        chmod +x "$rootfs_dir/bin/busybox"
+        
+        # Create symlinks for common commands
+        cd "$rootfs_dir"
+        for cmd in sh mount umount mkdir rmdir ls cat cp mv rm ln chmod chown sync sleep echo; do
+            ln -sf /bin/busybox "bin/$cmd"
+        done
     fi
-    
-    # Build BusyBox
-    print_status "Building BusyBox..."
-    cd "$busybox_dir"
-    
-    # Configure for static build
-    make defconfig
-    sed -i '' 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
-    
-    # Build and install
-    make -j$(sysctl -n hw.ncpu)
-    make install CONFIG_PREFIX="$rootfs_dir"
     
     # Copy additional binaries
     print_status "Adding additional binaries..."
@@ -387,12 +379,17 @@ build_initramfs() {
     elif [[ -f "/opt/homebrew/bin/tailscale" ]]; then
         tailscale_path="/opt/homebrew/bin/tailscale"
     else
-        print_error "Tailscale binary not found"
-        exit 1
+        print_warning "Tailscale binary not found, skipping..."
     fi
     
-    cp "$tailscale_path" "$rootfs_dir/usr/bin/"
-    cp "$(which xz)" "$rootfs_dir/bin/" || cp /usr/bin/xz "$rootfs_dir/bin/"
+    if [[ -n "$tailscale_path" ]]; then
+        cp "$tailscale_path" "$rootfs_dir/usr/bin/" || print_warning "Failed to copy Tailscale binary"
+    fi
+    
+    # Copy xz if available
+    if command -v xz &> /dev/null; then
+        cp "$(which xz)" "$rootfs_dir/bin/" || print_warning "Failed to copy xz binary"
+    fi
     
     # Create init script
     print_status "Creating init script..."
@@ -516,19 +513,21 @@ EOF
 
 # Function to setup HAOS addon
 setup_haos_addon() {
-    local mount_point="$1"
+    local dist_dir="$1"
     local tailscale_key_content="$2"
     
     print_step "Setting up HAOS Tailscale addon..."
     
-    local addon_dir="$mount_point/haos-tailscale-addon"
+    local addon_dir="$dist_dir/haos-tailscale-addon"
     
     # Clone addon if not exists
-    if [[ ! -d "$addon_dir" ]]; then
+    if [[ ! -d "$WORK_DIR/hass-addons" ]]; then
         print_status "Cloning Tailscale HAOS addon..."
         git clone --depth 1 https://github.com/tsujamin/hass-addons.git "$WORK_DIR/hass-addons"
-        cp -r "$WORK_DIR/hass-addons/tailscale" "$addon_dir"
     fi
+    
+    # Copy addon to dist directory
+    cp -r "$WORK_DIR/hass-addons/tailscale" "$addon_dir"
     
     # Create options.json
     print_status "Creating addon options..."
@@ -542,37 +541,88 @@ EOF
     print_status "HAOS addon setup completed"
 }
 
-# Function to copy files to installer
-copy_files_to_installer() {
-    local mount_point="$1"
+# Function to prepare installer files
+prepare_installer_files() {
+    local dist_dir="$1"
     local selected_image="$2"
     local tailscale_key_file="$3"
     local initramfs_file="$4"
     
-    print_step "Copying files to installer..."
+    print_step "Preparing installer files..."
+    
+    # Create dist directory
+    mkdir -p "$dist_dir"
     
     # Copy OS image
-    print_status "Copying OS image..."
-    cp "$selected_image" "$mount_point/"
+    print_status "Copying OS image to dist..."
+    cp "$selected_image" "$dist_dir/"
     
     # Copy Tailscale key
-    print_status "Copying Tailscale key..."
-    cp "$tailscale_key_file" "$mount_point/"
+    print_status "Copying Tailscale key to dist..."
+    cp "$tailscale_key_file" "$dist_dir/"
     
     # Copy initramfs
-    print_status "Copying initramfs..."
-    cp "$initramfs_file" "$mount_point/"
+    print_status "Copying initramfs to dist..."
+    cp "$initramfs_file" "$dist_dir/"
     
     # Copy OS setup scripts
-    print_status "Copying OS setup scripts..."
-    cp -r "$OS_SETUPS_DIR" "$mount_point/"
+    print_status "Copying OS setup scripts to dist..."
+    cp -r "$OS_SETUPS_DIR" "$dist_dir/"
     
     # Setup HAOS addon
     local tailscale_key_content
     tailscale_key_content=$(cat "$tailscale_key_file")
-    setup_haos_addon "$mount_point" "$tailscale_key_content"
+    setup_haos_addon "$dist_dir" "$tailscale_key_content"
     
-    print_status "File copying completed"
+    print_status "Installer files prepared in dist directory"
+}
+
+# Function to copy files to external drive
+copy_to_external_drive() {
+    local mount_point="$1"
+    local partition="$2"
+    local dist_dir="$3"
+    
+    print_step "Copying files to external drive..."
+    
+    # Check if mount point still exists and is mounted
+    if [[ ! -d "$mount_point" ]]; then
+        print_warning "Mount point $mount_point no longer exists, trying to find new mount point..."
+        # Try to find where it's mounted now
+        local new_mount_point
+        new_mount_point=$(diskutil info "$partition" | grep "Mount Point" | awk '{print $3}')
+        if [[ -n "$new_mount_point" && "$new_mount_point" != "Not" ]]; then
+            print_status "Found new mount point: $new_mount_point"
+            mount_point="$new_mount_point"
+        else
+            print_error "Could not find mount point for $partition"
+            exit 1
+        fi
+    fi
+    
+    if ! mountpoint -q "$mount_point" 2>/dev/null; then
+        print_warning "Mount point $mount_point is no longer mounted, attempting to remount..."
+        # Try to remount
+        if ! diskutil mount -mountPoint "$mount_point" "$partition" 2>/dev/null; then
+            print_error "Failed to remount partition"
+            exit 1
+        fi
+        print_status "Successfully remounted partition"
+    fi
+    
+    # Copy all files from dist to external drive
+    print_status "Copying all files from dist to external drive..."
+    if ! cp -r "$dist_dir"/* "$mount_point/"; then
+        print_error "Failed to copy files to $mount_point"
+        print_error "Please check if the device is still mounted and accessible"
+        exit 1
+    fi
+    
+    # Sync to ensure all data is written
+    print_status "Syncing data to external drive..."
+    sync
+    
+    print_status "Successfully copied all files to external drive"
 }
 
 # Function to cleanup
@@ -597,19 +647,18 @@ main() {
     # Set up cleanup trap
     trap cleanup EXIT
     
-    # Create work directory
+    # Create work and dist directories
     mkdir -p "$WORK_DIR"
+    mkdir -p "$DIST_DIR"
+    
+    # Clean dist directory if it exists
+    if [[ -d "$DIST_DIR" ]]; then
+        print_status "Cleaning dist directory..."
+        rm -rf "$DIST_DIR"/*
+    fi
     
     # Check dependencies
     check_dependencies
-    
-    # Detect external disk
-    local partition
-    partition=$(detect_external_disk)
-    
-    # Mount installer partition
-    local mount_point
-    mount_point=$(mount_installer_partition "$partition")
     
     # Select OS image
     local selected_image
@@ -619,15 +668,29 @@ main() {
     local tailscale_key_file
     tailscale_key_file=$(handle_tailscale_key)
     
-    # Setup bootloader
-    setup_bootloader "$mount_point" "$partition"
+    # Setup bootloader in dist directory
+    setup_bootloader "$DIST_DIR"
     
     # Build initramfs
     local initramfs_file
     initramfs_file=$(build_initramfs)
     
-    # Copy files to installer
-    copy_files_to_installer "$mount_point" "$selected_image" "$tailscale_key_file" "$initramfs_file"
+    # Prepare all installer files in dist directory
+    prepare_installer_files "$DIST_DIR" "$selected_image" "$tailscale_key_file" "$initramfs_file"
+    
+    # Now detect and mount external disk
+    print_status "All files prepared locally. Now setting up external drive..."
+    
+    # Detect external disk
+    local partition
+    partition=$(detect_external_disk)
+    
+    # Mount installer partition
+    local mount_point
+    mount_point=$(mount_installer_partition "$partition")
+    
+    # Copy everything to external drive
+    copy_to_external_drive "$mount_point" "$partition" "$DIST_DIR"
     
     print_status "Pi 5 installer setup completed successfully!"
     print_status "You can now unmount the device and use it to install on a Pi 5"

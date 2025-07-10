@@ -76,3 +76,5 @@ pids
 *.njsproj
 *.sln
 *.sw?
+
+dist/
