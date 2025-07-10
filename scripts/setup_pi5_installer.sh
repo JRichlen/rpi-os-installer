@@ -92,7 +92,8 @@ detect_external_disk() {
             local disk_info
             disk_info=$(diskutil info "$line" 2>/dev/null || echo "")
             
-            if [[ "$disk_info" =~ "Location.*External" && "$disk_info" =~ "Protocol.*USB" ]]; then
+            # Check if it's an external disk (USB, Thunderbolt, etc.)
+            if [[ "$disk_info" =~ Device\ Location.*External ]]; then
                 external_disks+=("$line")
             fi
         fi
@@ -117,14 +118,14 @@ detect_external_disk() {
     while IFS= read -r partition; do
         if [[ -n "$partition" ]]; then
             local partition_info
-            partition_info=$(diskutil info "$partition" 2>/dev/null || echo "")
+            partition_info=$(diskutil info "/dev/$partition" 2>/dev/null || echo "")
             
-            if [[ "$partition_info" =~ "File System Personality.*FAT32" ]]; then
-                fat32_partition="$partition"
+            if [[ "$partition_info" =~ File\ System\ Personality.*FAT32 ]]; then
+                fat32_partition="/dev/$partition"
                 break
             fi
         fi
-    done < <(diskutil list "$disk" | grep "^   [0-9]" | awk '{print $NF}' | sed "s|^|${disk}s|")
+    done < <(diskutil list "$disk" | grep "^   [0-9]" | awk '{print $NF}')
     
     if [[ -z "$fat32_partition" ]]; then
         print_error "No FAT32 partition found on $disk"
