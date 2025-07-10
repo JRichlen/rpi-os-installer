@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="$PROJECT_DIR/images4rpi"
-WORK_DIR="$HOME/pi5_installer_work"
+WORK_DIR="$PROJECT_DIR/pi5_installer_work"
 OS_SETUPS_DIR="$WORK_DIR/os-setups"
 
 # Function to print colored output

@@ -16,16 +16,16 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="$PROJECT_DIR/images4rpi"
-WORK_DIR="$HOME/pi5_installer_work"
+WORK_DIR="$PROJECT_DIR/pi5_installer_work"
 OS_SETUPS_DIR="$WORK_DIR/os-setups"
 
 # Function to print colored output
 print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${GREEN}[INFO]${NC} $1" >&2
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $1" >&2
 }
 
 print_error() {
@@ -33,7 +33,7 @@ print_error() {
 }
 
 print_step() {
-    echo -e "${BLUE}[STEP]${NC} $1"
+    echo -e "${BLUE}[STEP]${NC} $1" >&2
 }
 
 # Function to check and install required tools
@@ -134,6 +134,7 @@ detect_external_disk() {
     fi
     
     print_status "Found FAT32 partition: $fat32_partition"
+    # Return the partition path - this goes to stdout, status messages go to stderr
     echo "$fat32_partition"
 }
 
@@ -150,13 +151,18 @@ mount_installer_partition() {
     # Unmount if already mounted
     diskutil unmount "$partition" 2>/dev/null || true
     
+    # Wait a moment for the unmount to complete
+    sleep 1
+    
     # Mount the partition
     if ! diskutil mount -mountPoint "$mount_point" "$partition"; then
         print_error "Failed to mount $partition"
+        print_error "Please check if the device is accessible and try again"
         exit 1
     fi
     
     print_status "Mounted $partition at $mount_point"
+    # Return the mount point
     echo "$mount_point"
 }
 
@@ -178,10 +184,10 @@ select_os_image() {
     
     # If only one image, use it
     if [[ ${#image_files[@]} -eq 1 ]]; then
-        local selected_image="${image_files[0]}"
-        print_status "Using single available image: $(basename "$selected_image")"
-        echo "$selected_image"
-        return
+    local selected_image="${image_files[0]}"
+    print_status "Using single available image: $(basename "$selected_image")"
+    echo "$selected_image"
+    return
     fi
     
     # Multiple images - prompt user
