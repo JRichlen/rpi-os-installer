@@ -215,6 +215,7 @@ if [[ -d "$MEDIA_ROOT/haos-tailscale-addon" ]]; then
     cp -r "$MEDIA_ROOT/haos-tailscale-addon"/* "$ADDON_DIR/"
     
     # Create options.json with the auth key
+    # TODO: Review secure handling of Tailscale auth keys
     cat > "$ADDON_DIR/options.json" << EOL
 {
   "auth_key": "$TAILSCALE_KEY_CONTENT"

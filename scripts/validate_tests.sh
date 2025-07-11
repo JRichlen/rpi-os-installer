@@ -100,7 +100,11 @@ if [[ ${#missing_tools[@]} -eq 0 ]]; then
     print_pass "All required testing tools available"
 else
     print_fail "Missing tools: ${missing_tools[*]}"
-    print_info "Install with: brew install ${missing_tools[*]}"
+    if [[ "${CI:-}" == "true" ]]; then
+        print_info "Install with: sudo apt-get install ${missing_tools[*]}"
+    else
+        print_info "Install with: brew install ${missing_tools[*]}"
+    fi
 fi
 
 # Test 7: Testing directory structure

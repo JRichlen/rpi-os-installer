@@ -77,32 +77,44 @@ check_dependencies() {
         fi
     done
     
-    # Check for Tailscale binary
+    # Check for Tailscale binary (optional in CI)
     local tailscale_path=""
-    if [[ -f "/usr/local/bin/tailscale" ]]; then
-        tailscale_path="/usr/local/bin/tailscale"
-    elif [[ -f "/opt/homebrew/bin/tailscale" ]]; then
-        tailscale_path="/opt/homebrew/bin/tailscale"
+    if [[ "${CI:-}" == "true" ]]; then
+        print_status "Running in CI environment - skipping Tailscale check"
     else
-        print_error "Tailscale binary not found"
-        print_error "Please install Tailscale: brew install tailscale"
-        exit 1
+        if [[ -f "/usr/local/bin/tailscale" ]]; then
+            tailscale_path="/usr/local/bin/tailscale"
+        elif [[ -f "/opt/homebrew/bin/tailscale" ]]; then
+            tailscale_path="/opt/homebrew/bin/tailscale"
+        else
+            print_error "Tailscale binary not found"
+            print_error "Please install Tailscale: brew install tailscale"
+            exit 1
+        fi
+        
+        print_status "Found Tailscale at: $tailscale_path"
     fi
-    
-    print_status "Found Tailscale at: $tailscale_path"
     
     # Install missing tools
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         print_warning "Missing tools: ${missing_tools[*]}"
         print_status "Installing missing tools with Homebrew..."
         
-        if ! command -v brew &> /dev/null; then
+        # Check for Homebrew
+        local brew_cmd=""
+        if [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+            # Linux Homebrew
+            brew_cmd="/home/linuxbrew/.linuxbrew/bin/brew"
+        elif command -v brew &> /dev/null; then
+            # macOS Homebrew
+            brew_cmd="brew"
+        else
             print_error "Homebrew is required but not installed"
             print_error "Please install Homebrew: https://brew.sh/"
             exit 1
         fi
         
-        brew install "${missing_tools[@]}"
+        "$brew_cmd" install "${missing_tools[@]}"
     fi
     
     print_status "All dependencies satisfied"
@@ -779,6 +791,12 @@ cleanup() {
 
 # Main function
 main() {
+    # Check for --check-deps-only flag
+    if [[ "$1" == "--check-deps-only" ]]; then
+        check_dependencies
+        exit 0
+    fi
+    
     print_status "Pi 5 Installer Setup"
     print_status "===================="
     
