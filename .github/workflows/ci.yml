@@ -18,9 +18,9 @@ jobs:
         
       - name: Run ShellCheck on all shell scripts
         run: |
-          echo "Running ShellCheck on all shell scripts..."
-          find . -name "*.sh" -type f -print0 | xargs -0 shellcheck
-          echo "✅ All shell scripts passed ShellCheck validation"
+          echo "Running ShellCheck validation..."
+          ./scripts/ci_shellcheck.sh
+          echo "✅ ShellCheck validation completed"
 
   build-validation:
     name: Build Process Validation
@@ -30,62 +30,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install system dependencies
+      - name: Run build process validation
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            make \
-            parted \
-            dosfstools \
-            e2fsprogs \
-            xz-utils \
-            unzip \
-            wget \
-            curl \
-            git \
-            cpio \
-            gzip \
-            rsync \
-            fdisk \
-            util-linux \
-            kpartx
-            
-      - name: Create required directories
-        run: |
-          mkdir -p images4rpi
-          mkdir -p pi5_installer_work
-          mkdir -p qemu_test
-          
-      - name: Download HAOS image for testing
-        run: |
-          echo "Downloading Home Assistant OS image for testing..."
-          sudo apt-get install -y jq
-          ./scripts/download_images.sh --haos
-          echo "✅ HAOS image downloaded"
-          
-      - name: Validate Makefile targets
-        run: |
-          echo "Testing Makefile targets..."
-          make help
-          make check-deps
-          echo "✅ Makefile validation passed"
-          
-      - name: Test script generation
-        run: |
-          echo "Testing OS setup script generation..."
-          make generate
-          echo "✅ Script generation completed successfully"
-          
-      - name: Validate generated scripts
-        run: |
-          echo "Validating generated scripts..."
-          if [ -d "pi5_installer_work/os-setups" ]; then
-            find pi5_installer_work/os-setups -name "*.sh" -type f -print0 | xargs -0 shellcheck
-            echo "✅ Generated scripts passed ShellCheck validation"
-          else
-            echo "⚠️  No generated scripts found to validate"
-          fi
+          echo "Running build process validation..."
+          ./scripts/ci_build_validation.sh
+          echo "✅ Build process validation completed"
 
   testing-framework:
     name: Testing Framework Validation
@@ -95,76 +44,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            make \
-            qemu-system-arm \
-            qemu-user-static \
-            binfmt-support \
-            parted \
-            dosfstools \
-            e2fsprogs \
-            xz-utils \
-            unzip \
-            wget \
-            curl \
-            git \
-            shellcheck \
-            cpio \
-            gzip \
-            rsync \
-            fdisk \
-            util-linux \
-            kpartx \
-            jq
-            
-      - name: Install Homebrew on Linux
-        run: |
-          echo "Installing Homebrew for Linux..."
-          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          # Add Homebrew to PATH
-          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          echo "✅ Homebrew installed successfully"
-            
-      - name: Install Docker
-        run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
-          sudo usermod -aG docker $USER
-          rm -f get-docker.sh
-          
-      - name: Create required directories
-        run: |
-          mkdir -p images4rpi
-          mkdir -p pi5_installer_work
-          mkdir -p qemu_test
-          
-      - name: Download HAOS image for testing
-        run: |
-          echo "Downloading Home Assistant OS image for testing..."
-          sudo apt-get install -y jq
-          ./scripts/download_images.sh --haos
-          echo "✅ HAOS image downloaded"
-          
       - name: Run testing framework validation
         run: |
-          # Set up Homebrew environment
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          echo "Running comprehensive testing validation..."
-          make validate
+          echo "Running testing framework validation..."
+          ./scripts/ci_testing_framework.sh
           echo "✅ Testing framework validation completed"
-          
-      - name: Test setup validation
-        run: |
-          # Set up Homebrew environment
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          echo "Running setup tests..."
-          make test-setup
-          echo "✅ Setup tests completed successfully"
 
   security-scan:
     name: Security Scanning
@@ -174,62 +58,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Scan for hardcoded secrets
+      - name: Run security scanning
         run: |
-          echo "Scanning for potential hardcoded secrets..."
-          # Look for hardcoded secrets (actual values, not variables)
-          # Exclude variable assignments, function parameters, and template variables
-          if grep -r -i -E "(password|secret|key|token|api)" --include="*.sh" . | \
-             grep -v -E "(PASSWORD|SECRET|KEY|TOKEN|API).*=.*\$" | \
-             grep -E "=.*['\"][^$][^{].*['\"]" | \
-             grep -v -E "(TAILSCALE_KEY_CONTENT|auth_key.*\$|tailscale\.key|authorized_keys)" | \
-             grep -v -E "api_url.*github\.com" | \
-             grep -v -E "# TODO.*token" | \
-             grep -v -E "local.*=.*\$" | \
-             grep -v -E "=.*\$\(.*\)"; then
-            echo "❌ Potential hardcoded secrets found"
-            exit 1
-          else
-            echo "✅ No hardcoded secrets detected"
-          fi
-          
-      - name: Check for dangerous commands
-        run: |
-          echo "Scanning for dangerous command patterns..."
-          # Look for potentially dangerous patterns
-          dangerous_found=false
-          
-          # Check for rm -rf without proper protection
-          if grep -r "rm -rf" --include="*.sh" . | grep -v "\${.*:?\}" | grep -v "\$(" | grep -v "# Safe"; then
-            echo "⚠️  Found potentially unsafe rm -rf commands"
-            dangerous_found=true
-          fi
-          
-          # Check for hardcoded device paths
-          if grep -r "/dev/.*" --include="*.sh" . | grep -v "detect_target_device" | grep -v "\$" | grep -v "#"; then
-            echo "⚠️  Found potentially hardcoded device paths"
-            dangerous_found=true
-          fi
-          
-          if [ "$dangerous_found" = true ]; then
-            echo "❌ Security scan found potential issues"
-            exit 1
-          else
-            echo "✅ Security scan passed"
-          fi
-          
-      - name: Validate file permissions
-        run: |
-          echo "Checking file permissions..."
-          # Check that shell scripts are executable
-          find . -name "*.sh" -type f ! -perm -u+x -print > /tmp/non_executable.txt
-          if [ -s /tmp/non_executable.txt ]; then
-            echo "❌ Found non-executable shell scripts:"
-            cat /tmp/non_executable.txt
-            exit 1
-          else
-            echo "✅ All shell scripts have proper permissions"
-          fi
+          echo "Running security scanning..."
+          ./scripts/ci_security_scan.sh
+          echo "✅ Security scanning completed"
 
   integration-test:
     name: Integration Testing
@@ -240,58 +73,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install system dependencies
+      - name: Run integration testing
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            make \
-            qemu-system-arm \
-            qemu-user-static \
-            binfmt-support \
-            parted \
-            dosfstools \
-            e2fsprogs \
-            xz-utils \
-            unzip \
-            wget \
-            curl \
-            git \
-            shellcheck \
-            cpio \
-            gzip \
-            rsync \
-            fdisk \
-            util-linux \
-            kpartx
-            
-      - name: Create required directories
-        run: |
-          mkdir -p images4rpi
-          mkdir -p pi5_installer_work
-          mkdir -p qemu_test
-          
-      - name: Download HAOS image for testing
-        run: |
-          echo "Downloading Home Assistant OS image for testing..."
-          sudo apt-get install -y jq
-          ./scripts/download_images.sh --haos
-          echo "✅ HAOS image downloaded"
-          
-      - name: Run full integration test
-        run: |
-          echo "Running full integration test..."
-          
-          # Test the complete workflow
-          make generate
-          
-          # Validate all generated scripts
-          if [ -d "pi5_installer_work/os-setups" ]; then
-            echo "Validating generated scripts..."
-            find pi5_installer_work/os-setups -name "*.sh" -type f -print0 | xargs -0 shellcheck
-          fi
-          
-          echo "✅ Integration test completed successfully"
+          echo "Running integration testing..."
+          ./scripts/ci_integration_test.sh
+          echo "✅ Integration testing completed"
 
   documentation-check:
     name: Documentation Validation
@@ -301,27 +87,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Check required documentation
+      - name: Run documentation validation
         run: |
-          echo "Checking required documentation files..."
-          required_docs=("README.md" "TESTING.md" ".github/copilot-instructions.md")
-          
-          for doc in "${required_docs[@]}"; do
-            if [ -f "$doc" ]; then
-              echo "✅ Found $doc"
-            else
-              echo "❌ Missing $doc"
-              exit 1
-            fi
-          done
-          
-      - name: Validate documentation links
-        run: |
-          echo "Validating documentation links..."
-          # Check for broken internal links (basic check)
-          if grep -r "\[.*\](.*/.*)" --include="*.md" . | grep -v "http"; then
-            echo "Found internal links - manual validation recommended"
-          fi
+          echo "Running documentation validation..."
+          ./scripts/ci_documentation_check.sh
           echo "✅ Documentation validation completed"
 
   summary:

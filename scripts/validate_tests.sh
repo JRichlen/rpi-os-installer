@@ -170,6 +170,7 @@ if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
 fi
 
 echo "   • Native macOS testing (quickest)"
+echo "   • CI validation scripts (comprehensive)"
 
 echo ""
 echo "🚀 Quick start commands:"
@@ -180,4 +181,14 @@ echo "   make test-docker                   # Setup ARM64 environment"
 echo "   make test-docker-interactive       # Interactive ARM64 testing"
 
 echo ""
-echo "📖 See TESTING.md for detailed testing workflows"
+echo "� CI validation commands:"
+echo "   make ci-all                        # Run all CI checks"
+echo "   make ci-shellcheck                 # ShellCheck validation"
+echo "   make ci-build                      # Build process validation"
+echo "   make ci-security                   # Security scanning"
+echo "   make ci-testing                    # Testing framework validation"
+echo "   make ci-integration                # Integration testing"
+echo "   make ci-docs                       # Documentation validation"
+
+echo ""
+echo "�📖 See TESTING.md for detailed testing workflows"

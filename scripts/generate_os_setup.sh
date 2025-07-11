@@ -309,6 +309,7 @@ generate_ubuntu_setup() {
 
 set -euo pipefail
 
+# shellcheck disable=SC2034  # Variable reserved for future use
 MEDIA_ROOT="$1"    # Reserved for future use - installer media root
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
