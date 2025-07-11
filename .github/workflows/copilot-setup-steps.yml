@@ -54,23 +54,26 @@ jobs:
             rsync \
             fdisk \
             util-linux \
-            kpartx \
-            losetup
+            kpartx
 
       - name: Install Docker (for testing containers)
         run: |
           curl -fsSL https://get.docker.com -o get-docker.sh
           sudo sh get-docker.sh
           sudo usermod -aG docker $USER
+          # Clean up installation script
+          rm -f get-docker.sh
 
       - name: Verify installation
         run: |
           make --version
           qemu-system-arm --version
-          docker --version
+          sudo docker --version
           shellcheck --version
           xz --version
           parted --version
+          losetup --version
+          kpartx -h || true
 
       - name: Create required directories
         run: |
