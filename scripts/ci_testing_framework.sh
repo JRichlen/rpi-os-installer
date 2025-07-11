@@ -111,7 +111,7 @@ run_setup_tests() {
     print_info "Running setup tests..."
     cd "$PROJECT_DIR"
     
-    if make test-setup > /dev/null 2>&1; then
+    if make test-setup; then
         print_pass "Setup tests completed successfully"
     else
         print_fail "Setup tests failed"
