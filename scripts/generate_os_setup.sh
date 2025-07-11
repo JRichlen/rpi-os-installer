@@ -96,6 +96,72 @@ cleanup() {
 
 trap cleanup EXIT
 
+# Create additional data partition for user data if space available
+print_status "Checking for additional disk space..."
+DISK_SIZE=$(parted /dev/nvme0n1 unit MB print | grep "Disk /dev/nvme0n1:" | awk '{print $3}' | sed 's/MB//')
+LAST_PARTITION_END=$(parted /dev/nvme0n1 unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
+
+# Reserve 20% or minimum 4GB for future OS versions, whichever is larger
+RESERVED_MB=$((DISK_SIZE / 5))  # 20% of disk
+if (( RESERVED_MB < 4096 )); then
+    RESERVED_MB=4096  # Minimum 4GB
+fi
+
+AVAILABLE_MB=$((DISK_SIZE - LAST_PARTITION_END - RESERVED_MB))
+
+if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
+    print_status "Creating additional data partition for Home Assistant..."
+    print_status "Reserving ${RESERVED_MB}MB for future OS versions"
+    
+    # Calculate end position (leave reserved space at end)
+    END_POSITION=$((DISK_SIZE - RESERVED_MB))
+    
+    # Get next available partition number
+    NEXT_PARTITION=$(parted /dev/nvme0n1 print | grep "^ " | tail -n 1 | awk '{print $1+1}')
+    
+    # Create new partition using available space (not all remaining space)
+    parted /dev/nvme0n1 mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
+    
+    # Wait for partition to be created
+    sleep 2
+    partprobe /dev/nvme0n1 || true
+    sleep 2
+    
+    # Format the new partition
+    NEW_PARTITION="/dev/nvme0n1p${NEXT_PARTITION}"
+    if [[ -b "$NEW_PARTITION" ]]; then
+        print_status "Formatting new data partition $NEW_PARTITION..."
+        mkfs.ext4 -F "$NEW_PARTITION" 2>/dev/null || true
+        
+        # Add label for easy identification
+        e2label "$NEW_PARTITION" "HAOS_DATA" 2>/dev/null || true
+        
+        # Mount and set up the additional data partition
+        EXTRA_DATA_MOUNT="/tmp/haos_extra_data"
+        mkdir -p "$EXTRA_DATA_MOUNT"
+        if mount "$NEW_PARTITION" "$EXTRA_DATA_MOUNT" 2>/dev/null; then
+            print_status "Created additional data partition $NEW_PARTITION ($(( AVAILABLE_MB / 1024 ))GB) for future use"
+            
+            # Create a README file explaining the partition
+            cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
+This is an additional data partition created by the Pi 5 installer.
+
+This partition survives OS reflashing and can be used for:
+- Home Assistant backups
+- Additional storage
+- Custom configurations
+
+The partition is labeled 'HAOS_DATA' and can be mounted manually if needed.
+EOL
+            
+            umount "$EXTRA_DATA_MOUNT" 2>/dev/null || true
+        fi
+        rmdir "$EXTRA_DATA_MOUNT" 2>/dev/null || true
+    fi
+else
+    print_status "Insufficient space for additional data partition (need >1GB, have ${AVAILABLE_MB}MB)"
+fi
+
 # Mount the flashed partitions
 print_status "Mounting HAOS partitions..."
 if ! mount /dev/nvme0n1p1 "$BOOT_MOUNT"; then
@@ -187,6 +253,79 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+# Create additional data partition for user data if space available
+print_status "Checking for additional disk space..."
+DISK_SIZE=$(parted /dev/nvme0n1 unit MB print | grep "Disk /dev/nvme0n1:" | awk '{print $3}' | sed 's/MB//')
+LAST_PARTITION_END=$(parted /dev/nvme0n1 unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
+
+# Reserve 20% or minimum 4GB for future OS versions, whichever is larger
+RESERVED_MB=$((DISK_SIZE / 5))  # 20% of disk
+if (( RESERVED_MB < 4096 )); then
+    RESERVED_MB=4096  # Minimum 4GB
+fi
+
+AVAILABLE_MB=$((DISK_SIZE - LAST_PARTITION_END - RESERVED_MB))
+
+if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
+    print_status "Creating additional data partition for Ubuntu..."
+    print_status "Reserving ${RESERVED_MB}MB for future OS versions"
+    
+    # Calculate end position (leave reserved space at end)
+    END_POSITION=$((DISK_SIZE - RESERVED_MB))
+    
+    # Get next available partition number
+    NEXT_PARTITION=$(parted /dev/nvme0n1 print | grep "^ " | tail -n 1 | awk '{print $1+1}')
+    
+    # Create new partition using available space (not all remaining space)
+    parted /dev/nvme0n1 mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
+    
+    # Wait for partition to be created
+    sleep 2
+    partprobe /dev/nvme0n1 || true
+    sleep 2
+    
+    # Format the new partition
+    NEW_PARTITION="/dev/nvme0n1p${NEXT_PARTITION}"
+    if [[ -b "$NEW_PARTITION" ]]; then
+        print_status "Formatting new data partition $NEW_PARTITION..."
+        mkfs.ext4 -F "$NEW_PARTITION" 2>/dev/null || true
+        
+        # Add label for easy identification
+        e2label "$NEW_PARTITION" "UBUNTU_HOME" 2>/dev/null || true
+        
+        # Mount and set up the additional data partition as /home
+        EXTRA_DATA_MOUNT="/tmp/ubuntu_extra_data"
+        mkdir -p "$EXTRA_DATA_MOUNT"
+        if mount "$NEW_PARTITION" "$EXTRA_DATA_MOUNT" 2>/dev/null; then
+            print_status "Setting up additional data partition $NEW_PARTITION ($(( AVAILABLE_MB / 1024 ))GB) as /home..."
+            
+            # Copy existing /home if it exists
+            if [[ -d "$ROOT_MOUNT/home" ]]; then
+                cp -a "$ROOT_MOUNT/home"/* "$EXTRA_DATA_MOUNT/" 2>/dev/null || true
+            fi
+            
+            # Create a README file explaining the partition
+            cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
+This is an additional /home partition created by the Pi 5 installer.
+
+This partition survives OS reflashing and contains user data.
+It is automatically mounted as /home via /etc/fstab.
+
+The partition is labeled 'UBUNTU_HOME' and can be identified by this label.
+EOL
+            
+            # Add to fstab for automatic mounting (use LABEL for reliability)
+            echo "LABEL=UBUNTU_HOME /home ext4 defaults 0 2" >> "$ROOT_MOUNT/etc/fstab"
+            
+            umount "$EXTRA_DATA_MOUNT" 2>/dev/null || true
+            print_status "Created additional data partition mounted at /home"
+        fi
+        rmdir "$EXTRA_DATA_MOUNT" 2>/dev/null || true
+    fi
+else
+    print_status "Insufficient space for additional data partition (need >1GB, have ${AVAILABLE_MB}MB)"
+fi
 
 # Mount the flashed partitions
 print_status "Mounting Ubuntu partitions..."
