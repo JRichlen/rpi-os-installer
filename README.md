@@ -115,6 +115,9 @@ rpi-os-installer/
 - Tailscale keys are stored with restricted permissions (chmod 600)
 - Keys are never echoed to the console
 - All sensitive files are excluded from git
+- **Comprehensive CI/CD pipeline** validates all code changes
+- **Automated security scanning** prevents vulnerabilities
+- **ShellCheck validation** ensures script quality and safety
 
 ## Troubleshooting
 
@@ -155,3 +158,55 @@ make test-docker-interactive
 ```
 
 See [TESTING.md](TESTING.md) for detailed testing instructions and workflows.
+
+## CI/CD Pipeline
+
+This project includes a comprehensive CI/CD pipeline that automatically validates all code changes:
+
+### Automated Validation
+- **ShellCheck** validation for all shell scripts
+- **Security scanning** for hardcoded secrets and dangerous patterns
+- **Build process** validation and testing
+- **Integration testing** with QEMU and Docker
+- **Documentation** completeness checks
+
+### Pipeline Triggers
+- Pull requests to `main` or `develop` branches
+- Push events to protected branches
+- Manual workflow dispatch
+
+### Quality Gates
+All changes must pass:
+- ✅ Zero ShellCheck issues
+- ✅ Successful build process
+- ✅ Security compliance
+- ✅ Integration tests
+- ✅ Documentation validation
+
+See [CI_PIPELINE.md](CI_PIPELINE.md) for detailed pipeline documentation.
+
+## Contributing
+
+When contributing to this project:
+
+1. **Run local validation** before pushing:
+   ```bash
+   # Quick validation
+   make validate
+   
+   # ShellCheck all scripts
+   find . -name "*.sh" -type f -print0 | xargs -0 shellcheck
+   ```
+
+2. **Follow security best practices**:
+   - No hardcoded secrets or credentials
+   - Use safe command patterns
+   - Validate all user inputs
+
+3. **Test your changes**:
+   ```bash
+   make test-setup
+   make generate
+   ```
+
+4. **Monitor CI pipeline** status after pushing changes

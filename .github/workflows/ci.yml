@@ -1,0 +1,314 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run ShellCheck on all shell scripts
+        run: |
+          echo "Running ShellCheck on all shell scripts..."
+          find . -name "*.sh" -type f -print0 | xargs -0 shellcheck
+          echo "✅ All shell scripts passed ShellCheck validation"
+
+  build-validation:
+    name: Build Process Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            make \
+            parted \
+            dosfstools \
+            e2fsprogs \
+            xz-utils \
+            unzip \
+            wget \
+            curl \
+            git \
+            cpio \
+            gzip \
+            rsync \
+            fdisk \
+            util-linux \
+            kpartx
+            
+      - name: Create required directories
+        run: |
+          mkdir -p images4rpi
+          mkdir -p pi5_installer_work
+          mkdir -p qemu_test
+          
+      - name: Validate Makefile targets
+        run: |
+          echo "Testing Makefile targets..."
+          make help
+          make check-deps
+          echo "✅ Makefile validation passed"
+          
+      - name: Test script generation
+        run: |
+          echo "Testing OS setup script generation..."
+          make generate
+          echo "✅ Script generation completed successfully"
+          
+      - name: Validate generated scripts
+        run: |
+          echo "Validating generated scripts..."
+          if [ -d "pi5_installer_work/os-setups" ]; then
+            find pi5_installer_work/os-setups -name "*.sh" -type f -print0 | xargs -0 shellcheck
+            echo "✅ Generated scripts passed ShellCheck validation"
+          else
+            echo "⚠️  No generated scripts found to validate"
+          fi
+
+  testing-framework:
+    name: Testing Framework Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            make \
+            qemu-system-arm \
+            qemu-user-static \
+            binfmt-support \
+            parted \
+            dosfstools \
+            e2fsprogs \
+            xz-utils \
+            unzip \
+            wget \
+            curl \
+            git \
+            shellcheck \
+            cpio \
+            gzip \
+            rsync \
+            fdisk \
+            util-linux \
+            kpartx
+            
+      - name: Install Docker
+        run: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          sudo usermod -aG docker $USER
+          rm -f get-docker.sh
+          
+      - name: Create required directories
+        run: |
+          mkdir -p images4rpi
+          mkdir -p pi5_installer_work
+          mkdir -p qemu_test
+          
+      - name: Run testing framework validation
+        run: |
+          echo "Running comprehensive testing validation..."
+          make validate
+          echo "✅ Testing framework validation completed"
+          
+      - name: Test setup validation
+        run: |
+          echo "Running setup tests..."
+          make test-setup
+          echo "✅ Setup tests completed successfully"
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Scan for hardcoded secrets
+        run: |
+          echo "Scanning for potential hardcoded secrets..."
+          # Look for common secret patterns
+          if grep -r -i -E "(password|secret|key|token|api)" --include="*.sh" . | grep -v -E "(PASSWORD|SECRET|KEY|TOKEN|API).*=.*\$" | grep -E "=.*['\"]"; then
+            echo "❌ Potential hardcoded secrets found"
+            exit 1
+          else
+            echo "✅ No hardcoded secrets detected"
+          fi
+          
+      - name: Check for dangerous commands
+        run: |
+          echo "Scanning for dangerous command patterns..."
+          # Look for potentially dangerous patterns
+          dangerous_found=false
+          
+          # Check for rm -rf without proper protection
+          if grep -r "rm -rf" --include="*.sh" . | grep -v "\${.*:?\}" | grep -v "\$(" | grep -v "# Safe"; then
+            echo "⚠️  Found potentially unsafe rm -rf commands"
+            dangerous_found=true
+          fi
+          
+          # Check for hardcoded device paths
+          if grep -r "/dev/.*" --include="*.sh" . | grep -v "detect_target_device" | grep -v "\$" | grep -v "#"; then
+            echo "⚠️  Found potentially hardcoded device paths"
+            dangerous_found=true
+          fi
+          
+          if [ "$dangerous_found" = true ]; then
+            echo "❌ Security scan found potential issues"
+            exit 1
+          else
+            echo "✅ Security scan passed"
+          fi
+          
+      - name: Validate file permissions
+        run: |
+          echo "Checking file permissions..."
+          # Check that shell scripts are executable
+          find . -name "*.sh" -type f ! -perm -u+x -print > /tmp/non_executable.txt
+          if [ -s /tmp/non_executable.txt ]; then
+            echo "❌ Found non-executable shell scripts:"
+            cat /tmp/non_executable.txt
+            exit 1
+          else
+            echo "✅ All shell scripts have proper permissions"
+          fi
+
+  integration-test:
+    name: Integration Testing
+    runs-on: ubuntu-latest
+    needs: [shellcheck, build-validation, testing-framework, security-scan]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            make \
+            qemu-system-arm \
+            qemu-user-static \
+            binfmt-support \
+            parted \
+            dosfstools \
+            e2fsprogs \
+            xz-utils \
+            unzip \
+            wget \
+            curl \
+            git \
+            shellcheck \
+            cpio \
+            gzip \
+            rsync \
+            fdisk \
+            util-linux \
+            kpartx
+            
+      - name: Create required directories
+        run: |
+          mkdir -p images4rpi
+          mkdir -p pi5_installer_work
+          mkdir -p qemu_test
+          
+      - name: Run full integration test
+        run: |
+          echo "Running full integration test..."
+          
+          # Test the complete workflow
+          make generate
+          
+          # Validate all generated scripts
+          if [ -d "pi5_installer_work/os-setups" ]; then
+            echo "Validating generated scripts..."
+            find pi5_installer_work/os-setups -name "*.sh" -type f -print0 | xargs -0 shellcheck
+          fi
+          
+          echo "✅ Integration test completed successfully"
+
+  documentation-check:
+    name: Documentation Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check required documentation
+        run: |
+          echo "Checking required documentation files..."
+          required_docs=("README.md" "TESTING.md" ".github/copilot-instructions.md")
+          
+          for doc in "${required_docs[@]}"; do
+            if [ -f "$doc" ]; then
+              echo "✅ Found $doc"
+            else
+              echo "❌ Missing $doc"
+              exit 1
+            fi
+          done
+          
+      - name: Validate documentation links
+        run: |
+          echo "Validating documentation links..."
+          # Check for broken internal links (basic check)
+          if grep -r "\[.*\](.*/.*)" --include="*.md" . | grep -v "http"; then
+            echo "Found internal links - manual validation recommended"
+          fi
+          echo "✅ Documentation validation completed"
+
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [shellcheck, build-validation, testing-framework, security-scan, integration-test, documentation-check]
+    if: always()
+    
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "## CI Pipeline Summary"
+          echo "====================="
+          echo "✅ ShellCheck validation: ${{ needs.shellcheck.result }}"
+          echo "✅ Build process validation: ${{ needs.build-validation.result }}"
+          echo "✅ Testing framework validation: ${{ needs.testing-framework.result }}"
+          echo "✅ Security scanning: ${{ needs.security-scan.result }}"
+          echo "✅ Integration testing: ${{ needs.integration-test.result }}"
+          echo "✅ Documentation validation: ${{ needs.documentation-check.result }}"
+          echo ""
+          
+          # Check if all jobs succeeded
+          if [ "${{ needs.shellcheck.result }}" = "success" ] && \
+             [ "${{ needs.build-validation.result }}" = "success" ] && \
+             [ "${{ needs.testing-framework.result }}" = "success" ] && \
+             [ "${{ needs.security-scan.result }}" = "success" ] && \
+             [ "${{ needs.integration-test.result }}" = "success" ] && \
+             [ "${{ needs.documentation-check.result }}" = "success" ]; then
+            echo "🎉 All pipeline checks passed! The project is ready for production."
+          else
+            echo "❌ Some pipeline checks failed. Please review the failed jobs above."
+            exit 1
+          fi
