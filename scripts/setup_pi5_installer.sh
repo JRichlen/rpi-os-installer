@@ -610,6 +610,11 @@ copy_to_external_drive() {
         print_status "Successfully remounted partition"
     fi
     
+    # Clear existing files from installation media to ensure clean setup
+    print_status "Clearing existing files from installation media..."
+    rm -rf "$mount_point"/* 2>/dev/null || true
+    rm -rf "$mount_point"/.* 2>/dev/null || true
+    
     # Copy all files from dist to external drive
     print_status "Copying all files from dist to external drive..."
     if ! cp -r "$dist_dir"/* "$mount_point/"; then
@@ -650,6 +655,15 @@ main() {
     # Create work and dist directories
     mkdir -p "$WORK_DIR"
     mkdir -p "$DIST_DIR"
+    
+    # Clean work directory if it exists (except for cached firmware and addons)
+    if [[ -d "$WORK_DIR" ]]; then
+        print_status "Cleaning work directory..."
+        # Preserve cached downloads and user-provided keys but clean generated files
+        find "$WORK_DIR" -name "initramfs.img" -delete 2>/dev/null || true
+        rm -rf "$WORK_DIR/rootfs" 2>/dev/null || true
+        rm -rf "$WORK_DIR/os-setups" 2>/dev/null || true
+    fi
     
     # Clean dist directory if it exists
     if [[ -d "$DIST_DIR" ]]; then

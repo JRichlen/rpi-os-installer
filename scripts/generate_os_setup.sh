@@ -142,8 +142,9 @@ if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
         if mount "$NEW_PARTITION" "$EXTRA_DATA_MOUNT" 2>/dev/null; then
             print_status "Created additional data partition $NEW_PARTITION ($(( AVAILABLE_MB / 1024 ))GB) for future use"
             
-            # Create a README file explaining the partition
-            cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
+            # Create a README file explaining the partition (only if it doesn't exist)
+            if [[ ! -f "$EXTRA_DATA_MOUNT/README.txt" ]]; then
+                cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
 This is an additional data partition created by the Pi 5 installer.
 
 This partition survives OS reflashing and can be used for:
@@ -153,6 +154,9 @@ This partition survives OS reflashing and can be used for:
 
 The partition is labeled 'HAOS_DATA' and can be mounted manually if needed.
 EOL
+            else
+                print_status "Data partition already has README.txt, preserving existing content"
+            fi
             
             umount "$EXTRA_DATA_MOUNT" 2>/dev/null || true
         fi
@@ -176,6 +180,14 @@ fi
 
 # Create addon directory structure
 ADDON_DIR="$DATA_MOUNT/addons/local/tailscale"
+print_status "Preparing addon directory structure..."
+
+# Clear any existing Tailscale addon (in case of reflash)
+if [[ -d "$DATA_MOUNT/addons/local/tailscale" ]]; then
+    print_status "Removing existing Tailscale addon..."
+    rm -rf "$DATA_MOUNT/addons/local/tailscale"
+fi
+
 mkdir -p "$ADDON_DIR"
 
 # Copy Tailscale addon files
@@ -300,13 +312,21 @@ if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
         if mount "$NEW_PARTITION" "$EXTRA_DATA_MOUNT" 2>/dev/null; then
             print_status "Setting up additional data partition $NEW_PARTITION ($(( AVAILABLE_MB / 1024 ))GB) as /home..."
             
-            # Copy existing /home if it exists
-            if [[ -d "$ROOT_MOUNT/home" ]]; then
-                cp -a "$ROOT_MOUNT/home"/* "$EXTRA_DATA_MOUNT/" 2>/dev/null || true
+            # Check if this is a fresh partition or if it has existing data
+            if [[ -z "$(ls -A "$EXTRA_DATA_MOUNT" 2>/dev/null)" ]]; then
+                print_status "Fresh data partition - copying existing /home data..."
+                # Copy existing /home if it exists
+                if [[ -d "$ROOT_MOUNT/home" ]]; then
+                    print_status "Copying existing /home data to data partition..."
+                    cp -a "$ROOT_MOUNT/home"/* "$EXTRA_DATA_MOUNT/" 2>/dev/null || true
+                fi
+            else
+                print_status "Data partition has existing content - preserving user data"
             fi
             
-            # Create a README file explaining the partition
-            cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
+            # Create a README file explaining the partition (only if it doesn't exist)
+            if [[ ! -f "$EXTRA_DATA_MOUNT/README.txt" ]]; then
+                cat > "$EXTRA_DATA_MOUNT/README.txt" << 'EOL'
 This is an additional /home partition created by the Pi 5 installer.
 
 This partition survives OS reflashing and contains user data.
@@ -314,6 +334,9 @@ It is automatically mounted as /home via /etc/fstab.
 
 The partition is labeled 'UBUNTU_HOME' and can be identified by this label.
 EOL
+            else
+                print_status "Data partition already has README.txt, preserving existing content"
+            fi
             
             # Add to fstab for automatic mounting (use LABEL for reliability)
             echo "LABEL=UBUNTU_HOME /home ext4 defaults 0 2" >> "$ROOT_MOUNT/etc/fstab"
@@ -341,11 +364,15 @@ fi
 
 # Install Tailscale key
 print_status "Installing Tailscale key..."
+# Remove any existing key (in case of reflash)
+rm -f "$ROOT_MOUNT/etc/tailscale.key" 2>/dev/null || true
 echo "$TAILSCALE_KEY_CONTENT" > "$ROOT_MOUNT/etc/tailscale.key"
 chmod 600 "$ROOT_MOUNT/etc/tailscale.key"
 
 # Copy Tailscale binary
 print_status "Installing Tailscale binary..."
+# Remove any existing binary (in case of reflash)
+rm -f "$ROOT_MOUNT/usr/bin/tailscale" 2>/dev/null || true
 TAILSCALE_PATH=""
 if [[ -f "/usr/local/bin/tailscale" ]]; then
     TAILSCALE_PATH="/usr/local/bin/tailscale"
@@ -361,6 +388,9 @@ chmod +x "$ROOT_MOUNT/usr/bin/tailscale"
 
 # Create systemd service
 print_status "Creating Tailscale systemd service..."
+# Remove any existing service (in case of reflash)
+rm -f "$ROOT_MOUNT/etc/systemd/system/tailscale.service" 2>/dev/null || true
+
 cat > "$ROOT_MOUNT/etc/systemd/system/tailscale.service" << 'EOL'
 [Unit]
 Description=Tailscale node agent
