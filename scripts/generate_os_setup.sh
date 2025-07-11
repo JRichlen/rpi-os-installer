@@ -56,12 +56,14 @@ generate_haos_setup() {
 #!/bin/bash
 
 # Auto-generated HAOS setup script
-# Args: <media_root> <tailscale_key_content>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
 
 set -euo pipefail
 
 MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
+WIFI_SSID="$3"
+WIFI_PASSWORD="$4"
 
 # Colors for output
 RED='\033[0;31m'
@@ -209,6 +211,65 @@ else
     exit 1
 fi
 
+# Configure WiFi and SSH
+print_status "Configuring WiFi and SSH..."
+
+# Create network configuration for Home Assistant OS
+if [[ -n "$WIFI_SSID" && -n "$WIFI_PASSWORD" ]]; then
+    print_status "Setting up WiFi network: $WIFI_SSID"
+    
+    # Create network configuration directory
+    mkdir -p "$DATA_MOUNT/network"
+    
+    # Create network manager configuration file
+    cat > "$DATA_MOUNT/network/my-network" << EOL
+[connection]
+id=my-network
+uuid=$(uuidgen)
+type=wifi
+
+[wifi]
+mode=infrastructure
+ssid=$WIFI_SSID
+
+[wifi-security]
+auth-alg=open
+key-mgmt=wpa-psk
+psk=$WIFI_PASSWORD
+
+[ipv4]
+method=auto
+
+[ipv6]
+addr-gen-mode=stable-privacy
+method=auto
+EOL
+    
+    print_status "WiFi configuration created"
+else
+    print_warning "WiFi credentials not provided, skipping WiFi setup"
+fi
+
+# Enable SSH by creating authorized_keys file
+print_status "Enabling SSH access..."
+mkdir -p "$DATA_MOUNT/ssh"
+# Create a placeholder for SSH keys - users can add their keys here
+cat > "$DATA_MOUNT/ssh/README.txt" << EOL
+SSH is enabled for Home Assistant OS.
+
+To add your SSH keys:
+1. Place your public key in this directory as 'authorized_keys'
+2. The key will be used for the 'root' user
+
+Example:
+echo "ssh-rsa AAAA... your-email@example.com" > authorized_keys
+
+You can also access SSH through the Home Assistant web interface
+under Supervisor > System > Host system.
+EOL
+
+print_status "SSH enabled - see $DATA_MOUNT/ssh/README.txt for instructions"
+
 print_status "Home Assistant OS setup completed successfully"
 EOF
 
@@ -226,12 +287,14 @@ generate_ubuntu_setup() {
 #!/bin/bash
 
 # Auto-generated Ubuntu setup script
-# Args: <media_root> <tailscale_key_content>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
 
 set -euo pipefail
 
 MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
+WIFI_SSID="$3"
+WIFI_PASSWORD="$4"
 
 # Colors for output
 RED='\033[0;31m'
@@ -414,6 +477,71 @@ EOL
 # Enable the service
 print_status "Enabling Tailscale service..."
 chroot "$ROOT_MOUNT" systemctl enable tailscale.service
+
+# Configure WiFi and SSH
+print_status "Configuring WiFi and SSH..."
+
+# Configure WiFi using netplan
+if [[ -n "$WIFI_SSID" && -n "$WIFI_PASSWORD" ]]; then
+    print_status "Setting up WiFi network: $WIFI_SSID"
+    
+    # Create netplan configuration for WiFi
+    cat > "$ROOT_MOUNT/etc/netplan/50-wifi.yaml" << EOL
+network:
+  version: 2
+  renderer: networkd
+  wifis:
+    wlan0:
+      dhcp4: true
+      dhcp6: true
+      access-points:
+        "$WIFI_SSID":
+          password: "$WIFI_PASSWORD"
+EOL
+    
+    # Set proper permissions
+    chmod 600 "$ROOT_MOUNT/etc/netplan/50-wifi.yaml"
+    
+    print_status "WiFi configuration created"
+else
+    print_warning "WiFi credentials not provided, skipping WiFi setup"
+fi
+
+# Enable SSH
+print_status "Enabling SSH service..."
+chroot "$ROOT_MOUNT" systemctl enable ssh.service
+
+# Create default ubuntu user if it doesn't exist
+if ! chroot "$ROOT_MOUNT" id ubuntu &>/dev/null; then
+    print_status "Creating ubuntu user..."
+    chroot "$ROOT_MOUNT" useradd -m -G sudo -s /bin/bash ubuntu
+    # Set up SSH directory for ubuntu user
+    mkdir -p "$ROOT_MOUNT/home/ubuntu/.ssh"
+    chmod 700 "$ROOT_MOUNT/home/ubuntu/.ssh"
+    chroot "$ROOT_MOUNT" chown ubuntu:ubuntu /home/ubuntu/.ssh
+fi
+
+# Create instructions for SSH access
+cat > "$ROOT_MOUNT/home/ubuntu/SSH_README.txt" << EOL
+SSH is enabled for Ubuntu Server.
+
+To add your SSH keys for the ubuntu user:
+1. Place your public key in ~/.ssh/authorized_keys
+2. Set proper permissions: chmod 600 ~/.ssh/authorized_keys
+
+Example:
+echo "ssh-rsa AAAA... your-email@example.com" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+
+You can also set a password for the ubuntu user:
+sudo passwd ubuntu
+
+The ubuntu user has sudo privileges.
+EOL
+
+chroot "$ROOT_MOUNT" chown ubuntu:ubuntu /home/ubuntu/SSH_README.txt
+
+print_status "SSH enabled - see /home/ubuntu/SSH_README.txt for instructions"
 
 print_status "Ubuntu Server setup completed successfully"
 EOF

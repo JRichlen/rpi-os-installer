@@ -277,6 +277,70 @@ handle_tailscale_key() {
     echo "$key_file"
 }
 
+# Function to handle WiFi credentials
+handle_wifi_credentials() {
+    print_step "Handling WiFi credentials..."
+    
+    local wifi_file="$WORK_DIR/wifi.conf"
+    
+    # Check if wifi credentials file exists
+    if [[ -f "$wifi_file" ]]; then
+        print_status "Using existing WiFi credentials file"
+        echo "$wifi_file"
+        return
+    fi
+    
+    # Get current WiFi SSID from macOS
+    local current_ssid
+    current_ssid=$(system_profiler SPAirPortDataType | grep -A 1 "Current Network" | grep -v "Current Network" | head -1 | awk '{print $1}' | sed 's/:$//' 2>/dev/null || echo "")
+    
+    if [[ -z "$current_ssid" ]]; then
+        print_warning "Could not detect current WiFi network"
+        read_user_input "Enter WiFi SSID: " wifi_ssid
+    else
+        print_status "Detected current WiFi network: $current_ssid"
+        read_user_input "Use this network? (y/n) [y]: " use_current
+        if [[ "$use_current" == "n" || "$use_current" == "N" ]]; then
+            read_user_input "Enter WiFi SSID: " wifi_ssid
+        else
+            wifi_ssid="$current_ssid"
+        fi
+    fi
+    
+    if [[ -z "$wifi_ssid" ]]; then
+        print_error "WiFi SSID cannot be empty"
+        exit 1
+    fi
+    
+    # Prompt for password
+    print_status "Please enter WiFi password for '$wifi_ssid':"
+    if [[ -t 0 ]]; then
+        echo -n "WiFi password: " > /dev/tty
+        read -r -s wifi_password < /dev/tty
+        echo > /dev/tty
+    else
+        echo -n "WiFi password: " >&2
+        read -r -s wifi_password <&0
+        echo >&2
+    fi
+    
+    if [[ -z "$wifi_password" ]]; then
+        print_error "WiFi password cannot be empty"
+        exit 1
+    fi
+    
+    # Save WiFi credentials securely
+    mkdir -p "$WORK_DIR"
+    cat > "$wifi_file" << EOL
+WIFI_SSID="$wifi_ssid"
+WIFI_PASSWORD="$wifi_password"
+EOL
+    chmod 600 "$wifi_file"
+    
+    print_status "WiFi credentials saved securely"
+    echo "$wifi_file"
+}
+
 # Function to setup bootloader
 setup_bootloader() {
     local dist_dir="$1"
@@ -547,6 +611,7 @@ prepare_installer_files() {
     local selected_image="$2"
     local tailscale_key_file="$3"
     local initramfs_file="$4"
+    local wifi_file="$5"
     
     print_step "Preparing installer files..."
     
@@ -560,6 +625,10 @@ prepare_installer_files() {
     # Copy Tailscale key
     print_status "Copying Tailscale key to dist..."
     cp "$tailscale_key_file" "$dist_dir/"
+    
+    # Copy WiFi credentials
+    print_status "Copying WiFi credentials to dist..."
+    cp "$wifi_file" "$dist_dir/"
     
     # Copy initramfs
     print_status "Copying initramfs to dist..."
@@ -687,6 +756,10 @@ main() {
     local tailscale_key_file
     tailscale_key_file=$(handle_tailscale_key)
     
+    # Handle WiFi credentials
+    local wifi_file
+    wifi_file=$(handle_wifi_credentials)
+    
     # Setup bootloader in dist directory
     setup_bootloader "$DIST_DIR"
     
@@ -695,7 +768,7 @@ main() {
     initramfs_file=$(build_initramfs)
     
     # Prepare all installer files in dist directory
-    prepare_installer_files "$DIST_DIR" "$selected_image" "$tailscale_key_file" "$initramfs_file"
+    prepare_installer_files "$DIST_DIR" "$selected_image" "$tailscale_key_file" "$initramfs_file" "$wifi_file"
     
     # Now detect and mount external disk
     print_status "All files prepared locally. Now setting up external drive..."
