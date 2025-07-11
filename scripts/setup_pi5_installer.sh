@@ -407,7 +407,7 @@ build_initramfs() {
     
     # Download pre-built BusyBox for ARM64
     print_status "Downloading pre-built BusyBox for ARM64..."
-    local busybox_url="https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+    local busybox_url="https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox"
     if ! curl -L "$busybox_url" -o "$rootfs_dir/bin/busybox"; then
         print_error "Failed to download BusyBox binary"
         print_warning "Trying to create a minimal initramfs without BusyBox..."
@@ -521,13 +521,57 @@ fi
 
 echo "Found OS image: $(basename "$OS_IMAGE")"
 
-# Flash to NVMe
-TARGET_DEVICE="/dev/nvme0n1"
-if [ ! -b "$TARGET_DEVICE" ]; then
-    echo "ERROR: Target device $TARGET_DEVICE not found"
+# Function to detect target device
+detect_target_device() {
+    # Look for available storage devices (excluding the installer media)
+    local installer_device=""
+    local available_devices=""
+    
+    # Try to identify the installer media device
+    if mountpoint -q "$MEDIA_MOUNT"; then
+        installer_device=$(findmnt -n -o SOURCE "$MEDIA_MOUNT" | sed 's/[0-9]*$//')
+    fi
+    
+    # Look for block devices that could be targets
+    for device in /dev/nvme* /dev/sd* /dev/mmcblk*; do
+        if [ -b "$device" ] && [ "$device" != "$installer_device" ]; then
+            # Skip partition devices, only consider whole disks
+            if [[ "$device" =~ ^/dev/(nvme[0-9]+n[0-9]+|sd[a-z]+|mmcblk[0-9]+)$ ]]; then
+                available_devices="$available_devices $device"
+            fi
+        fi
+    done
+    
+    # Count available devices
+    device_count=$(echo "$available_devices" | wc -w)
+    
+    if [ "$device_count" -eq 0 ]; then
+        echo "ERROR: No suitable target devices found"
+        echo "Available devices must be different from installer media"
+        return 1
+    elif [ "$device_count" -eq 1 ]; then
+        echo "$available_devices" | tr -d ' '
+    else
+        echo "Multiple target devices found: $available_devices"
+        echo "Please specify which device to use"
+        return 1
+    fi
+}
+
+# Detect target device
+TARGET_DEVICE=$(detect_target_device)
+if [ $? -ne 0 ] || [ -z "$TARGET_DEVICE" ]; then
+    echo "ERROR: Could not determine target device"
+    echo "This installer requires exactly one target storage device"
+    echo "that is different from the installer media"
     /bin/sh
     exit 1
 fi
+
+echo "Target device detected: $TARGET_DEVICE"
+echo "WARNING: This will completely erase $TARGET_DEVICE"
+echo "Press Enter to continue or Ctrl+C to abort..."
+read -r
 
 echo "Flashing OS image to $TARGET_DEVICE..."
 xz -dc "$OS_IMAGE" | dd of="$TARGET_DEVICE" bs=4M status=progress
@@ -553,7 +597,13 @@ if [ -f "$SETUP_SCRIPT" ]; then
     fi
     
     chmod +x "$SETUP_SCRIPT"
-    "$SETUP_SCRIPT" "$MEDIA_MOUNT" "$TAILSCALE_KEY_CONTENT"
+    WIFI_SSID=""
+    WIFI_PASSWORD=""
+    if [ -f "$MEDIA_MOUNT/wifi.txt" ]; then
+        WIFI_SSID="$(head -1 "$MEDIA_MOUNT/wifi.txt")"
+        WIFI_PASSWORD="$(tail -1 "$MEDIA_MOUNT/wifi.txt")"
+    fi
+    "$SETUP_SCRIPT" "$MEDIA_MOUNT" "$TAILSCALE_KEY_CONTENT" "$WIFI_SSID" "$WIFI_PASSWORD" "$TARGET_DEVICE"
 else
     echo "WARNING: No setup script found for $OS_NAME"
 fi
