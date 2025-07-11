@@ -49,14 +49,19 @@ prompt_user() {
 # Function to read user input directly from terminal
 read_user_input() {
     local prompt="$1"
-    local var_name="$2"
+    local varname="$2"
+    local input_value
+    
     if [[ -t 0 ]]; then
         echo -n "$prompt" > /dev/tty
-        read -r "$var_name" < /dev/tty
+        read -r input_value < /dev/tty
     else
         echo -n "$prompt" >&2
-        read -r "$var_name" <&0
+        read -r input_value <&0
     fi
+    
+    # Use printf to assign the value to the variable name
+    printf -v "$varname" '%s' "$input_value"
 }
 
 # Function to check and install required tools
@@ -225,6 +230,7 @@ select_os_image() {
         prompt_user "  $((i+1)). $(basename "${image_files[$i]}")"
     done
     
+    local selection
     read_user_input "Select image (1-${#image_files[@]}): " selection
     
     # Validate selection
@@ -299,6 +305,7 @@ handle_wifi_credentials() {
         read_user_input "Enter WiFi SSID: " wifi_ssid
     else
         print_status "Detected current WiFi network: $current_ssid"
+        local use_current
         read_user_input "Use this network? (y/n) [y]: " use_current
         if [[ "$use_current" == "n" || "$use_current" == "N" ]]; then
             read_user_input "Enter WiFi SSID: " wifi_ssid
@@ -686,8 +693,10 @@ copy_to_external_drive() {
     
     # Clear existing files from installation media to ensure clean setup
     print_status "Clearing existing files from installation media..."
-    rm -rf "$mount_point"/* 2>/dev/null || true
-    rm -rf "$mount_point"/.* 2>/dev/null || true
+    if [[ -n "$mount_point" && -d "$mount_point" ]]; then
+        rm -rf "${mount_point:?}"/* 2>/dev/null || true
+        rm -rf "${mount_point:?}"/.* 2>/dev/null || true
+    fi
     
     # Copy all files from dist to external drive
     print_status "Copying all files from dist to external drive..."
@@ -742,7 +751,7 @@ main() {
     # Clean dist directory if it exists
     if [[ -d "$DIST_DIR" ]]; then
         print_status "Cleaning dist directory..."
-        rm -rf "$DIST_DIR"/*
+        rm -rf "${DIST_DIR:?}"/*
     fi
     
     # Check dependencies

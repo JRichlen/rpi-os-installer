@@ -75,6 +75,10 @@ print_status() {
     echo -e "${GREEN}[HAOS-SETUP]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[HAOS-SETUP]${NC} $1"
+}
+
 print_error() {
     echo -e "${RED}[HAOS-SETUP]${NC} $1" >&2
 }
@@ -291,7 +295,7 @@ generate_ubuntu_setup() {
 
 set -euo pipefail
 
-MEDIA_ROOT="$1"
+MEDIA_ROOT="$1"    # Reserved for future use - installer media root
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
 WIFI_PASSWORD="$4"
@@ -304,6 +308,10 @@ NC='\033[0m' # No Color
 
 print_status() {
     echo -e "${GREEN}[UBUNTU-SETUP]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[UBUNTU-SETUP]${NC} $1"
 }
 
 print_error() {
@@ -624,9 +632,13 @@ main() {
     
     # Process each image file
     for image_file in "${image_files[@]}"; do
-        local filename="$(basename "$image_file")"
-        local basename="${filename%.img.xz}"
-        local os_type="$(detect_os_type "$filename")"
+        local filename
+        local basename
+        local os_type
+        
+        filename="$(basename "$image_file")"
+        basename="${filename%.img.xz}"
+        os_type="$(detect_os_type "$filename")"
         
         print_status "Processing $filename (detected as: $os_type)"
         

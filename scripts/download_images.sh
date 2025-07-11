@@ -227,7 +227,6 @@ main() {
     # Parse command line arguments
     local download_haos=false
     local download_ubuntu=false
-    local auto_download=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -245,7 +244,6 @@ main() {
                 shift
                 ;;
             --auto)
-                auto_download=true
                 download_haos=true
                 download_ubuntu=true
                 shift

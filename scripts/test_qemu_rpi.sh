@@ -16,7 +16,6 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="$PROJECT_DIR/images4rpi"
-WORK_DIR="$PROJECT_DIR/pi5_installer_work"
 QEMU_DIR="$PROJECT_DIR/qemu_test"
 
 print_status() {
@@ -100,7 +99,8 @@ setup_qemu_environment() {
 # Function to extract and prepare OS image for testing
 prepare_test_image() {
     local image_file="$1"
-    local image_name=$(basename "$image_file" .img.xz)
+    local image_name
+    image_name=$(basename "$image_file" .img.xz)
     
     print_step "Preparing test image: $image_name"
     
@@ -278,7 +278,8 @@ main() {
             
             check_prerequisites
             setup_qemu_environment
-            local prepared_image=$(prepare_test_image "$image_path")
+            local prepared_image
+            prepared_image=$(prepare_test_image "$image_path")
             run_qemu_simulation "os-test" "$prepared_image"
             ;;
             
