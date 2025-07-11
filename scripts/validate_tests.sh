@@ -101,9 +101,19 @@ if [[ ${#missing_tools[@]} -eq 0 ]]; then
 else
     print_fail "Missing tools: ${missing_tools[*]}"
     if [[ "${CI:-}" == "true" ]]; then
-        print_info "Install with: sudo apt-get install ${missing_tools[*]}"
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            print_info "Install with: sudo apt-get install ${missing_tools[*]}"
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Install with: brew install ${missing_tools[*]}"
+        else
+            print_info "Install required tools with your package manager"
+        fi
     else
-        print_info "Install with: brew install ${missing_tools[*]}"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Install with: brew install ${missing_tools[*]}"
+        else
+            print_info "Install with your package manager"
+        fi
     fi
 fi
 

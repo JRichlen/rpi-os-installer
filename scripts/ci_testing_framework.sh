@@ -35,43 +35,79 @@ install_dependencies() {
     print_info "Installing testing dependencies..."
     
     if [[ "${CI:-}" == "true" ]]; then
-        # CI environment (Ubuntu)
-        sudo apt-get update
-        sudo apt-get install -y \
-            build-essential \
-            make \
-            qemu-system-arm \
-            qemu-user-static \
-            binfmt-support \
-            parted \
-            dosfstools \
-            e2fsprogs \
-            xz-utils \
-            unzip \
-            wget \
-            curl \
-            git \
-            shellcheck \
-            cpio \
-            gzip \
-            rsync \
-            fdisk \
-            util-linux \
-            kpartx \
-            jq
+        # Detect OS in CI environment
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            # Linux CI environment (Ubuntu)
+            print_info "Detected Linux CI environment"
+            sudo apt-get update
+            sudo apt-get install -y \
+                build-essential \
+                make \
+                qemu-system-arm \
+                qemu-user-static \
+                binfmt-support \
+                parted \
+                dosfstools \
+                e2fsprogs \
+                xz-utils \
+                unzip \
+                wget \
+                curl \
+                git \
+                shellcheck \
+                cpio \
+                gzip \
+                rsync \
+                fdisk \
+                util-linux \
+                kpartx \
+                jq
+                
+            # Install Docker
+            if ! command -v docker > /dev/null 2>&1; then
+                print_info "Installing Docker..."
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sudo sh get-docker.sh
+                sudo usermod -aG docker "$USER"
+                rm -f get-docker.sh
+            fi
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS CI environment
+            print_info "Detected macOS CI environment"
             
-        # Install Docker
-        if ! command -v docker > /dev/null 2>&1; then
-            print_info "Installing Docker..."
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sudo sh get-docker.sh
-            sudo usermod -aG docker "$USER"
-            rm -f get-docker.sh
+            # Install Homebrew if not present
+            if ! command -v brew > /dev/null 2>&1; then
+                print_info "Installing Homebrew..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            fi
+            
+            # Install required packages
+            brew install \
+                make \
+                xz \
+                git \
+                cpio \
+                jq \
+                shellcheck \
+                qemu || true
+                
+            # Docker for Mac is usually pre-installed in GitHub Actions macOS runners
+            if ! command -v docker > /dev/null 2>&1; then
+                print_info "Docker not found - may not be available in this macOS runner"
+            fi
+        else
+            print_info "Unknown CI environment OS: $OSTYPE"
         fi
     else
-        # Local environment (macOS)
-        print_info "Local environment detected - ensure testing dependencies are installed"
-        print_info "Run: brew install make xz git cpio jq qemu"
+        # Local environment
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Local macOS environment detected - ensure testing dependencies are installed"
+            print_info "Run: brew install make xz git cpio jq shellcheck qemu"
+        else
+            print_info "Local Linux environment detected - ensure testing dependencies are installed"
+            print_info "Install required packages with your package manager"
+        fi
     fi
 }
 
