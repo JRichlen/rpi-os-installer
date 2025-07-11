@@ -567,7 +567,12 @@ prepare_installer_files() {
     
     # Copy OS setup scripts
     print_status "Copying OS setup scripts to dist..."
-    cp -r "$OS_SETUPS_DIR" "$dist_dir/"
+    if [[ -d "$OS_SETUPS_DIR" ]]; then
+        cp -r "$OS_SETUPS_DIR" "$dist_dir/"
+    else
+        print_warning "OS setup scripts directory not found: $OS_SETUPS_DIR"
+        print_warning "This may be normal if no OS-specific setup scripts were generated"
+    fi
     
     # Setup HAOS addon
     local tailscale_key_content
@@ -659,10 +664,10 @@ main() {
     # Clean work directory if it exists (except for cached firmware and addons)
     if [[ -d "$WORK_DIR" ]]; then
         print_status "Cleaning work directory..."
-        # Preserve cached downloads and user-provided keys but clean generated files
+        # Preserve cached downloads, user-provided keys, and generated OS setup scripts
         find "$WORK_DIR" -name "initramfs.img" -delete 2>/dev/null || true
         rm -rf "$WORK_DIR/rootfs" 2>/dev/null || true
-        rm -rf "$WORK_DIR/os-setups" 2>/dev/null || true
+        # Note: Preserving os-setups directory as it contains generated setup scripts
     fi
     
     # Clean dist directory if it exists
