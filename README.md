@@ -95,6 +95,21 @@ rpi-os-installer/
    - Unmount the installer media
    - Connect to Pi 5
    - Power on for hands-free installation
+   - SSH access will be automatically configured with your Mac keys
+
+## SSH Access After Installation
+
+After successful installation, you can SSH into your Pi using:
+
+```bash
+# For Ubuntu installations
+ssh ubuntu@<pi-ip-address>
+
+# For Home Assistant OS installations
+ssh root@<pi-ip-address>
+```
+
+Your existing Mac SSH keys will work automatically if you selected them during setup.
 
 ## Supported OS Images
 
@@ -105,10 +120,46 @@ rpi-os-installer/
 
 - Automatic external disk detection
 - Interactive OS image selection
+- SSH key reuse from Mac ~/.ssh/ directory (with user consent)
 - Tailscale key management
 - Automatic initramfs building
 - OS-specific post-install configuration
 - Idempotent operation (safe to run multiple times)
+
+## SSH Key Setup
+
+The installer can automatically configure SSH access using your existing Mac SSH keys:
+
+### How It Works
+
+1. **Detection**: The installer scans your `~/.ssh/` directory for public keys
+2. **User Consent**: You're prompted to approve SSH key usage
+3. **Key Selection**: Choose which keys to use (or select all available keys)
+4. **Automatic Installation**: Public keys are copied to the Pi's authorized_keys
+
+### Supported Key Types
+
+- RSA keys (`id_rsa.pub`)
+- Ed25519 keys (`id_ed25519.pub`)
+- ECDSA keys (`id_ecdsa.pub`)
+- DSA keys (`id_dsa.pub`)
+- Custom named keys (any `.pub` file)
+
+### Passphrase-Protected Keys
+
+- **Unprotected keys**: Work automatically with no additional setup
+- **Passphrase-protected keys**: You may need to unlock them first:
+  ```bash
+  ssh-add ~/.ssh/id_rsa  # Add key to ssh-agent
+  # or unlock via macOS Keychain if configured
+  ```
+
+### Security Notes
+
+- Only public keys are ever copied (never private keys)
+- SSH keys are stored with restricted permissions (600)
+- User consent is required before any SSH keys are used
+- Keys are installed into the appropriate user account (ubuntu for Ubuntu, root for HAOS)
 
 ## Security
 

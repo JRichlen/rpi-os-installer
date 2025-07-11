@@ -56,7 +56,7 @@ generate_haos_setup() {
 #!/bin/bash
 
 # Auto-generated HAOS setup script
-# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password> <ssh_keys_dir>
 
 set -euo pipefail
 
@@ -64,6 +64,7 @@ MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
 WIFI_PASSWORD="$4"
+SSH_KEYS_DIR="$5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -253,8 +254,29 @@ fi
 # Enable SSH by creating authorized_keys file
 print_status "Enabling SSH access..."
 mkdir -p "$DATA_MOUNT/ssh"
-# Create a placeholder for SSH keys - users can add their keys here
-cat > "$DATA_MOUNT/ssh/README.txt" << EOL
+
+# Install SSH keys if available
+if [[ -d "$SSH_KEYS_DIR" && -n "$(ls -A "$SSH_KEYS_DIR" 2>/dev/null)" ]]; then
+    print_status "Installing SSH keys for Home Assistant OS..."
+    
+    # Combine all public keys into authorized_keys
+    > "$DATA_MOUNT/ssh/authorized_keys"
+    for key_file in "$SSH_KEYS_DIR"/*.pub; do
+        if [[ -f "$key_file" ]]; then
+            print_status "  - Adding $(basename "$key_file")"
+            cat "$key_file" >> "$DATA_MOUNT/ssh/authorized_keys"
+            echo >> "$DATA_MOUNT/ssh/authorized_keys"  # Add newline after each key
+        fi
+    done
+    
+    # Set proper permissions
+    chmod 600 "$DATA_MOUNT/ssh/authorized_keys"
+    
+    print_status "SSH keys installed successfully"
+else
+    print_warning "No SSH keys found, creating placeholder"
+    # Create a placeholder for SSH keys - users can add their keys here
+    cat > "$DATA_MOUNT/ssh/README.txt" << EOL
 SSH is enabled for Home Assistant OS.
 
 To add your SSH keys:
@@ -267,6 +289,7 @@ echo "ssh-rsa AAAA... your-email@example.com" > authorized_keys
 You can also access SSH through the Home Assistant web interface
 under Supervisor > System > Host system.
 EOL
+fi
 
 print_status "SSH enabled - see $DATA_MOUNT/ssh/README.txt for instructions"
 
@@ -287,7 +310,7 @@ generate_ubuntu_setup() {
 #!/bin/bash
 
 # Auto-generated Ubuntu setup script
-# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password> <ssh_keys_dir>
 
 set -euo pipefail
 
@@ -295,6 +318,7 @@ MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
 WIFI_PASSWORD="$4"
+SSH_KEYS_DIR="$5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -521,8 +545,44 @@ if ! chroot "$ROOT_MOUNT" id ubuntu &>/dev/null; then
     chroot "$ROOT_MOUNT" chown ubuntu:ubuntu /home/ubuntu/.ssh
 fi
 
-# Create instructions for SSH access
-cat > "$ROOT_MOUNT/home/ubuntu/SSH_README.txt" << EOL
+# Install SSH keys if available
+if [[ -d "$SSH_KEYS_DIR" && -n "$(ls -A "$SSH_KEYS_DIR" 2>/dev/null)" ]]; then
+    print_status "Installing SSH keys for ubuntu user..."
+    
+    # Combine all public keys into authorized_keys
+    > "$ROOT_MOUNT/home/ubuntu/.ssh/authorized_keys"
+    for key_file in "$SSH_KEYS_DIR"/*.pub; do
+        if [[ -f "$key_file" ]]; then
+            print_status "  - Adding $(basename "$key_file")"
+            cat "$key_file" >> "$ROOT_MOUNT/home/ubuntu/.ssh/authorized_keys"
+            echo >> "$ROOT_MOUNT/home/ubuntu/.ssh/authorized_keys"  # Add newline after each key
+        fi
+    done
+    
+    # Set proper permissions
+    chmod 600 "$ROOT_MOUNT/home/ubuntu/.ssh/authorized_keys"
+    chroot "$ROOT_MOUNT" chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+    
+    print_status "SSH keys installed successfully for ubuntu user"
+    
+    # Create instructions for SSH access
+    cat > "$ROOT_MOUNT/home/ubuntu/SSH_README.txt" << EOL
+SSH is enabled for Ubuntu Server with your Mac SSH keys installed.
+
+Your SSH keys have been automatically configured for the ubuntu user.
+You can now connect using:
+  ssh ubuntu@<pi-ip-address>
+
+To add additional SSH keys:
+1. Place your public key in ~/.ssh/authorized_keys
+2. Set proper permissions: chmod 600 ~/.ssh/authorized_keys
+
+The ubuntu user has sudo privileges.
+EOL
+else
+    print_warning "No SSH keys found, creating manual setup instructions"
+    # Create instructions for SSH access
+    cat > "$ROOT_MOUNT/home/ubuntu/SSH_README.txt" << EOL
 SSH is enabled for Ubuntu Server.
 
 To add your SSH keys for the ubuntu user:
@@ -538,6 +598,7 @@ sudo passwd ubuntu
 
 The ubuntu user has sudo privileges.
 EOL
+fi
 
 chroot "$ROOT_MOUNT" chown ubuntu:ubuntu /home/ubuntu/SSH_README.txt
 
@@ -560,12 +621,15 @@ generate_unknown_setup() {
 #!/bin/bash
 
 # Auto-generated generic setup script
-# Args: <media_root> <tailscale_key_content>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password> <ssh_keys_dir>
 
 set -euo pipefail
 
 MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
+WIFI_SSID="$3"
+WIFI_PASSWORD="$4"
+SSH_KEYS_DIR="$5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -587,6 +651,9 @@ print_error() {
 
 print_warning "Unknown OS type detected - no specific setup will be performed"
 print_status "Tailscale key is available for manual configuration"
+if [[ -d "$SSH_KEYS_DIR" && -n "$(ls -A "$SSH_KEYS_DIR" 2>/dev/null)" ]]; then
+    print_status "SSH keys are available in $SSH_KEYS_DIR for manual configuration"
+fi
 print_status "Generic setup completed"
 EOF
 
@@ -624,9 +691,11 @@ main() {
     
     # Process each image file
     for image_file in "${image_files[@]}"; do
-        local filename="$(basename "$image_file")"
+        local filename
+        filename="$(basename "$image_file")"
         local basename="${filename%.img.xz}"
-        local os_type="$(detect_os_type "$filename")"
+        local os_type
+        os_type="$(detect_os_type "$filename")"
         
         print_status "Processing $filename (detected as: $os_type)"
         
