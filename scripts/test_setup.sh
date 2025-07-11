@@ -123,13 +123,19 @@ test_dependencies() {
     
     # Check for required tools
     local tools=(git xz cpio)
+    local missing_tools=0
     for tool in "${tools[@]}"; do
         if command -v "$tool" &> /dev/null; then
             print_pass "$tool is available"
         else
             print_fail "$tool is not available"
+            ((missing_tools++))
         fi
     done
+    
+    if [[ "$missing_tools" -gt 0 ]]; then
+        return 1
+    fi
     
     # Check for Tailscale (optional in CI)
     if [[ "${CI:-}" == "true" ]]; then
@@ -140,6 +146,7 @@ test_dependencies() {
             print_pass "Tailscale binary found"
         else
             print_fail "Tailscale binary not found"
+            # Note: Tailscale is optional, so we don't fail the test
         fi
     fi
     
@@ -181,13 +188,18 @@ main() {
     
     local test_results=()
     
-    # Run tests
+    # Run tests - disable exit on error temporarily for test collection
+    set +e
+    
     test_project_structure && test_results+=("PASS") || test_results+=("FAIL")
     test_script_permissions && test_results+=("PASS") || test_results+=("FAIL")
     test_images_directory && test_results+=("PASS") || test_results+=("FAIL")
     test_dependencies && test_results+=("PASS") || test_results+=("FAIL")
     test_generate_script && test_results+=("PASS") || test_results+=("FAIL")
     test_installer_script && test_results+=("PASS") || test_results+=("FAIL")
+    
+    # Re-enable exit on error
+    set -e
     
     # Summary
     echo
