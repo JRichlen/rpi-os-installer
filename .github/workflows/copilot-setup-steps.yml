@@ -1,7 +1,5 @@
 name: "Copilot Setup Steps"
 
-# Automatically run the setup steps when they are changed to allow for easy validation, and
-# allow manual testing through the repository's "Actions" tab
 on:
   workflow_dispatch:
   push:
@@ -12,32 +10,26 @@ on:
       - .github/workflows/copilot-setup-steps.yml
 
 jobs:
-  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
-    runs-on: macos-13
+    runs-on: ubuntu-latest
 
-    # Set the permissions to the lowest permissions possible needed for your steps.
-    # Copilot will be given its own token for its operations.
     permissions:
-      # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
       contents: read
 
-    # Set environment variables from secrets
     env:
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
 
-    # You can define any steps you want, and they will run before the agent starts.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
-          # Install required packages with Homebrew
-          brew install \
+          sudo apt-get update
+          sudo apt-get install -y \
             make \
-            qemu \
-            xz \
+            qemu-system \
+            xz-utils \
             unzip \
             wget \
             curl \
@@ -46,12 +38,23 @@ jobs:
             cpio \
             gzip \
             rsync \
-            jq
+            jq \
+            docker.io
 
-      - name: Install Colima and Docker CLI
+      - name: Install Homebrew for linux
         run: |
-          brew install docker colima
-          colima start
+          if ! command -v brew > /dev/null 2>&1; then
+            echo "Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          else
+            echo "Homebrew is already installed"
+          fi
+
+      - name: Start Docker service
+        run: |
+          sudo systemctl start docker
+          sudo systemctl enable docker
 
       - name: Verify installation
         run: |
@@ -71,35 +74,23 @@ jobs:
 
       - name: Set up shell environment
         run: |
-          echo "export PATH=/opt/homebrew/bin:\$PATH" >> ~/.zshrc
-          echo "alias ll='ls -la'" >> ~/.zshrc
-          
-          # Add homebrew paths for keg-only packages to current session
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
-          echo "/opt/homebrew/opt/cpio/bin" >> $GITHUB_PATH
-          
-          # Also add to shell profiles for completeness
-          echo 'export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"' >> ~/.zshrc
-          echo 'export PATH="/opt/homebrew/opt/cpio/bin:$PATH"' >> ~/.zshrc
+          echo "export PATH=/usr/local/bin:\$PATH" >> ~/.bashrc
+          echo "alias ll='ls -la'" >> ~/.bashrc
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Test GitHub API access
         run: |
           echo "Testing GitHub API access..."
-          # Test the Home Assistant OS releases API
           response=$(curl -s "https://api.github.com/repos/home-assistant/operating-system/releases/latest")
           echo "API Response length: $(echo "$response" | wc -c)"
           echo "First 500 characters of response:"
           echo "$response" | head -c 500
           echo ""
-          
-          # Check for rate limiting
           if echo "$response" | grep -q "rate limit"; then
             echo "⚠️  Rate limit detected in API response"
             echo "Full response:"
             echo "$response"
           fi
-          
           echo "Testing jq parsing..."
           if echo "$response" | jq -e . > /dev/null 2>&1; then
             echo "✅ Valid JSON response"
