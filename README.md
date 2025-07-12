@@ -91,10 +91,42 @@ rpi-os-installer/
    ./scripts/setup_pi5_installer.sh
    ```
 
+   During setup, you'll be prompted for:
+   - **OS Image Selection**: Choose which OS image to install
+   - **Tailscale Key**: Enter your Tailscale authentication key
+   - **WiFi Credentials**: Configure network access for the Pi
+   - **SSH Key Setup**: Option to enable SSH access with your existing keys
+
 4. **Deploy:**
    - Unmount the installer media
    - Connect to Pi 5
    - Power on for hands-free installation
+
+### SSH Key Setup Examples
+
+**For users with existing SSH keys:**
+```bash
+# The installer will automatically detect keys like:
+# ~/.ssh/id_ed25519.pub
+# ~/.ssh/id_rsa.pub
+
+# If you have multiple keys, you'll be prompted to select one
+```
+
+**For users without SSH keys:**
+```bash
+# The installer can generate a new key pair for you
+# When prompted, choose "y" to generate new keys
+```
+
+**For users with passphrase-protected keys:**
+```bash
+# Ensure your key is loaded in ssh-agent:
+ssh-add ~/.ssh/id_ed25519
+
+# Or use macOS Keychain to store the passphrase
+# The installer will verify key accessibility
+```
 
 ## Supported OS Images
 
@@ -106,9 +138,40 @@ rpi-os-installer/
 - Automatic external disk detection
 - Interactive OS image selection
 - Tailscale key management
+- **SSH key management with user consent**
 - Automatic initramfs building
 - OS-specific post-install configuration
 - Idempotent operation (safe to run multiple times)
+
+### SSH Key Management
+
+The installer can automatically detect and configure SSH keys for secure access to your Pi:
+
+- **Automatic Detection**: Scans `~/.ssh/` directory for public keys (`id_rsa.pub`, `id_ed25519.pub`, etc.)
+- **User Consent**: Prompts for explicit permission before using any SSH keys
+- **Key Selection**: Allows selection when multiple keys are available
+- **Passphrase Support**: Works with both passphrase-protected and unprotected keys
+- **Secure Copy**: Only copies public keys (never private keys) to the target device
+- **Key Generation**: Option to generate new SSH key pairs if none exist
+- **Cross-Platform**: Supports macOS Keychain and ssh-agent integration
+
+#### SSH Key Workflow
+
+1. **Detection**: The installer scans your `~/.ssh/` directory for public keys
+2. **Consent**: You're asked if you want to enable SSH key access
+3. **Selection**: If multiple keys exist, you can choose which one to use
+4. **Validation**: The installer checks if the key is passphrase-protected
+5. **Authentication**: For passphrase-protected keys, it verifies accessibility via ssh-agent/Keychain
+6. **Installation**: Only the public key is copied to the Pi's `authorized_keys` file
+7. **Service Setup**: SSH service is automatically enabled on the target device
+
+#### Supported Key Types
+
+- RSA (`id_rsa.pub`)
+- Ed25519 (`id_ed25519.pub`) - Recommended
+- ECDSA (`id_ecdsa.pub`)
+- DSA (`id_dsa.pub`)
+- Any other `.pub` files in `~/.ssh/`
 
 ## Security
 

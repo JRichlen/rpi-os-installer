@@ -360,6 +360,206 @@ EOL
     echo "$wifi_file"
 }
 
+# Function to detect SSH keys
+detect_ssh_keys() {
+    print_step "Detecting SSH keys..."
+    
+    local ssh_dir="$HOME/.ssh"
+    local ssh_keys=()
+    
+    if [[ ! -d "$ssh_dir" ]]; then
+        print_warning "SSH directory not found: $ssh_dir"
+        return 1
+    fi
+    
+    # Look for common SSH public key files
+    local key_patterns=("id_rsa.pub" "id_ed25519.pub" "id_ecdsa.pub" "id_dsa.pub")
+    
+    for pattern in "${key_patterns[@]}"; do
+        local key_file="$ssh_dir/$pattern"
+        if [[ -f "$key_file" ]]; then
+            ssh_keys+=("$key_file")
+        fi
+    done
+    
+    # Also look for any other .pub files
+    while IFS= read -r -d '' pub_file; do
+        # Skip if already in the list
+        local already_found=false
+        for existing_key in "${ssh_keys[@]}"; do
+            if [[ "$pub_file" == "$existing_key" ]]; then
+                already_found=true
+                break
+            fi
+        done
+        
+        if [[ "$already_found" == false ]]; then
+            ssh_keys+=("$pub_file")
+        fi
+    done < <(find "$ssh_dir" -name "*.pub" -type f -print0 2>/dev/null)
+    
+    if [[ ${#ssh_keys[@]} -eq 0 ]]; then
+        print_warning "No SSH public keys found in $ssh_dir"
+        return 1
+    fi
+    
+    print_status "Found ${#ssh_keys[@]} SSH public key(s):"
+    for key in "${ssh_keys[@]}"; do
+        print_status "  - $(basename "$key")"
+    done
+    
+    # Return the keys as a space-separated string
+    printf '%s\n' "${ssh_keys[@]}"
+}
+
+# Function to validate SSH key passphrase
+validate_ssh_key_passphrase() {
+    local private_key="$1"
+    
+    # Check if the private key is encrypted using a timeout approach
+    # We'll send empty input and check if it prompts for a passphrase
+    if timeout 2 ssh-keygen -y -f "$private_key" < /dev/null >/dev/null 2>&1; then
+        return 1  # Key is not encrypted - command succeeded
+    else
+        # Command failed or timed out - likely encrypted
+        return 0  # Key is encrypted
+    fi
+}
+
+# Function to handle SSH key selection and setup
+handle_ssh_keys() {
+    print_step "Handling SSH keys..."
+    
+    local ssh_key_file="$WORK_DIR/ssh_key.pub"
+    
+    # Check if SSH key file already exists
+    if [[ -f "$ssh_key_file" ]]; then
+        print_status "Using existing SSH key file"
+        echo "$ssh_key_file"
+        return
+    fi
+    
+    # Ask user if they want to set up SSH keys
+    local setup_ssh
+    read_user_input "Would you like to set up SSH key access for the Pi? (y/n) [y]: " setup_ssh
+    if [[ "$setup_ssh" == "n" || "$setup_ssh" == "N" ]]; then
+        print_status "Skipping SSH key setup"
+        # Create empty file to indicate SSH setup was skipped
+        touch "$ssh_key_file"
+        echo "$ssh_key_file"
+        return
+    fi
+    
+    # Detect available SSH keys
+    local available_keys
+    if ! available_keys=$(detect_ssh_keys); then
+        print_warning "No SSH keys found. Would you like to generate a new SSH key pair?"
+        local generate_new
+        read_user_input "Generate new SSH key pair? (y/n) [n]: " generate_new
+        if [[ "$generate_new" == "y" || "$generate_new" == "Y" ]]; then
+            print_status "Generating new SSH key pair..."
+            local ssh_dir="$HOME/.ssh"
+            mkdir -p "$ssh_dir"
+            ssh-keygen -t ed25519 -f "$ssh_dir/id_ed25519" -N "" -C "pi-installer-$(date +%Y%m%d)"
+            available_keys=$(detect_ssh_keys)
+        else
+            print_status "Skipping SSH key setup"
+            touch "$ssh_key_file"
+            echo "$ssh_key_file"
+            return
+        fi
+    fi
+    
+    # Convert to array
+    local ssh_keys=()
+    while IFS= read -r key; do
+        ssh_keys+=("$key")
+    done <<< "$available_keys"
+    
+    local selected_key=""
+    
+    if [[ ${#ssh_keys[@]} -eq 1 ]]; then
+        selected_key="${ssh_keys[0]}"
+        print_status "Using single available SSH key: $(basename "$selected_key")"
+    else
+        # Multiple keys - prompt user
+        prompt_user "Available SSH keys:"
+        for i in "${!ssh_keys[@]}"; do
+            local key_file="${ssh_keys[$i]}"
+            local key_type=""
+            local key_comment=""
+            
+            # Extract key type and comment
+            if [[ -f "$key_file" ]]; then
+                key_type=$(awk '{print $1}' "$key_file" 2>/dev/null || echo "unknown")
+                key_comment=$(awk '{print $NF}' "$key_file" 2>/dev/null || echo "")
+            fi
+            
+            prompt_user "  $((i+1)). $(basename "$key_file") ($key_type) $key_comment"
+        done
+        
+        local selection
+        read_user_input "Select SSH key (1-${#ssh_keys[@]}): " selection
+        
+        # Validate selection
+        if ! [[ "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#ssh_keys[@]} ]]; then
+            print_error "Invalid selection: $selection"
+            exit 1
+        fi
+        
+        selected_key="${ssh_keys[$((selection-1))]}"
+        print_status "Selected SSH key: $(basename "$selected_key")"
+    fi
+    
+    # Get the corresponding private key path
+    local private_key="${selected_key%.pub}"
+    
+    # Check if private key exists and validate passphrase
+    if [[ -f "$private_key" ]]; then
+        if validate_ssh_key_passphrase "$private_key"; then
+            print_status "SSH key is passphrase-protected"
+            print_status "Attempting to test key accessibility..."
+            
+            # Test if key can be used (might be loaded in ssh-agent)
+            if ssh-keygen -y -f "$private_key" >/dev/null 2>&1; then
+                print_status "SSH key is accessible (passphrase already provided or in ssh-agent)"
+            else
+                print_status "SSH key requires passphrase authentication"
+                print_status "Please ensure your SSH key is loaded in ssh-agent or Keychain:"
+                print_status "  ssh-add $private_key"
+                print_status "Or use Keychain on macOS to store the passphrase"
+                
+                # Ask if user wants to continue
+                local continue_anyway
+                read_user_input "Continue with SSH key setup? (y/n) [y]: " continue_anyway
+                if [[ "$continue_anyway" == "n" || "$continue_anyway" == "N" ]]; then
+                    print_status "Skipping SSH key setup"
+                    touch "$ssh_key_file"
+                    echo "$ssh_key_file"
+                    return
+                fi
+            fi
+        else
+            print_status "SSH key is not passphrase-protected"
+        fi
+    fi
+    
+    # Copy the public key
+    mkdir -p "$WORK_DIR"
+    if [[ -f "$selected_key" ]]; then
+        cp "$selected_key" "$ssh_key_file"
+        chmod 644 "$ssh_key_file"
+        print_status "SSH public key copied successfully"
+        print_status "Key type: $(awk '{print $1}' "$ssh_key_file")"
+        print_status "Key comment: $(awk '{print $NF}' "$ssh_key_file")"
+    else
+        print_error "Selected SSH key file not found: $selected_key"
+        exit 1
+    fi
+    
+    echo "$ssh_key_file"
+}
+
 # Function to setup bootloader
 setup_bootloader() {
     local dist_dir="$1"
@@ -597,6 +797,117 @@ echo "Probing partitions..."
 partprobe "$TARGET_DEVICE" || true
 sleep 2
 
+# Function to setup SSH keys
+setup_ssh_keys() {
+    local target_device="$1"
+    local ssh_key_file="$MEDIA_MOUNT/ssh_key.pub"
+    
+    if [ ! -f "$ssh_key_file" ] || [ ! -s "$ssh_key_file" ]; then
+        echo "No SSH key found, skipping SSH setup"
+        return 0
+    fi
+    
+    echo "Setting up SSH key access..."
+    
+    # Find the root partition (usually the second partition)
+    local root_partition=""
+    if [[ "$target_device" =~ nvme ]]; then
+        root_partition="${target_device}p2"
+    else
+        root_partition="${target_device}2"
+    fi
+    
+    # Check if root partition exists
+    if [ ! -b "$root_partition" ]; then
+        echo "WARNING: Root partition not found at $root_partition"
+        echo "Trying alternative partition detection..."
+        
+        # Try to find the largest partition (likely root)
+        for part in "${target_device}"*; do
+            if [ -b "$part" ] && [ "$part" != "$target_device" ]; then
+                local part_size
+                part_size=$(cat "/sys/class/block/$(basename "$part")/size" 2>/dev/null || echo "0")
+                if [ "$part_size" -gt 1000000 ]; then  # > 500MB, likely root
+                    root_partition="$part"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    if [ ! -b "$root_partition" ]; then
+        echo "ERROR: Could not find root partition for SSH setup"
+        return 1
+    fi
+    
+    echo "Using root partition: $root_partition"
+    
+    # Create temporary mount point
+    local root_mount="/tmp/root_mount"
+    mkdir -p "$root_mount"
+    
+    # Mount root partition
+    if ! mount "$root_partition" "$root_mount"; then
+        echo "ERROR: Could not mount root partition for SSH setup"
+        return 1
+    fi
+    
+    # Create SSH directories and copy key
+    local ssh_dir="$root_mount/home/pi/.ssh"
+    if [ ! -d "$root_mount/home/pi" ]; then
+        # Try alternative user directories
+        for user_dir in "$root_mount/home"/*; do
+            if [ -d "$user_dir" ] && [ "$(basename "$user_dir")" != "root" ]; then
+                ssh_dir="$user_dir/.ssh"
+                break
+            fi
+        done
+        
+        # If no user directory found, create pi user directory
+        if [ ! -d "$ssh_dir" ]; then
+            mkdir -p "$root_mount/home/pi"
+            ssh_dir="$root_mount/home/pi/.ssh"
+        fi
+    fi
+    
+    echo "Setting up SSH key in: $ssh_dir"
+    
+    # Create .ssh directory
+    mkdir -p "$ssh_dir"
+    
+    # Copy SSH key to authorized_keys
+    if [ -f "$ssh_key_file" ] && [ -s "$ssh_key_file" ]; then
+        cp "$ssh_key_file" "$ssh_dir/authorized_keys"
+        chmod 600 "$ssh_dir/authorized_keys"
+        chmod 700 "$ssh_dir"
+        
+        # Set correct ownership (1000:1000 is typically the first user)
+        chown -R 1000:1000 "$ssh_dir" 2>/dev/null || true
+        
+        echo "SSH key installed successfully"
+        echo "Key type: $(awk '{print $1}' "$ssh_key_file" 2>/dev/null || echo "unknown")"
+    else
+        echo "ERROR: SSH key file is empty or not found"
+        umount "$root_mount"
+        return 1
+    fi
+    
+    # Enable SSH service (for Raspberry Pi OS)
+    if [ -d "$root_mount/etc/systemd/system" ]; then
+        # Enable SSH service
+        chroot "$root_mount" systemctl enable ssh 2>/dev/null || true
+        
+        # Also create the SSH enable flag for Raspberry Pi OS
+        touch "$root_mount/boot/ssh" 2>/dev/null || true
+    fi
+    
+    # Unmount root partition
+    umount "$root_mount"
+    
+    echo "SSH key setup completed"
+    return 0
+}
+
 # Detect OS type and run setup
 OS_NAME="$(basename "$OS_IMAGE" .img.xz)"
 SETUP_SCRIPT="$MEDIA_MOUNT/os-setups/setup_${OS_NAME}.sh"
@@ -620,11 +931,15 @@ else
     echo "WARNING: No setup script found for $OS_NAME"
 fi
 
+# Setup SSH keys
+setup_ssh_keys "$TARGET_DEVICE"
+
 # Cleanup
 umount "$MEDIA_MOUNT"
 sync
 
 echo "Installation completed successfully!"
+echo "SSH key access has been configured (if key was provided)"
 echo "Rebooting in 5 seconds..."
 sleep 5
 reboot -f
@@ -681,6 +996,7 @@ prepare_installer_files() {
     local tailscale_key_file="$3"
     local initramfs_file="$4"
     local wifi_file="$5"
+    local ssh_key_file="$6"
     
     print_step "Preparing installer files..."
     
@@ -698,6 +1014,14 @@ prepare_installer_files() {
     # Copy WiFi credentials
     print_status "Copying WiFi credentials to dist..."
     cp "$wifi_file" "$dist_dir/"
+    
+    # Copy SSH key if it exists and is not empty
+    if [[ -f "$ssh_key_file" && -s "$ssh_key_file" ]]; then
+        print_status "Copying SSH key to dist..."
+        cp "$ssh_key_file" "$dist_dir/"
+    else
+        print_status "No SSH key to copy (SSH setup was skipped)"
+    fi
     
     # Copy initramfs
     print_status "Copying initramfs to dist..."
@@ -837,6 +1161,10 @@ main() {
     local wifi_file
     wifi_file=$(handle_wifi_credentials)
     
+    # Handle SSH keys
+    local ssh_key_file
+    ssh_key_file=$(handle_ssh_keys)
+    
     # Setup bootloader in dist directory
     setup_bootloader "$DIST_DIR"
     
@@ -845,7 +1173,7 @@ main() {
     initramfs_file=$(build_initramfs)
     
     # Prepare all installer files in dist directory
-    prepare_installer_files "$DIST_DIR" "$selected_image" "$tailscale_key_file" "$initramfs_file" "$wifi_file"
+    prepare_installer_files "$DIST_DIR" "$selected_image" "$tailscale_key_file" "$initramfs_file" "$wifi_file" "$ssh_key_file"
     
     # Now detect and mount external disk
     print_status "All files prepared locally. Now setting up external drive..."
