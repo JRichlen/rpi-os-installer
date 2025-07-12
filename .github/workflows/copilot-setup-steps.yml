@@ -48,22 +48,6 @@ jobs:
             rsync \
             jq
 
-      - name: Install Docker (for testing containers)
-        run: |
-          # Docker Desktop is pre-installed on macOS GitHub runners
-          # Just verify it's available and start if needed
-          if ! docker info > /dev/null 2>&1; then
-            echo "Starting Docker Desktop..."
-            open -a Docker
-            # Wait for Docker to start
-            timeout=60
-            while ! docker info > /dev/null 2>&1 && [ $timeout -gt 0 ]; do
-              echo "Waiting for Docker to start... ($timeout seconds remaining)"
-              sleep 5
-              timeout=$((timeout - 5))
-            done
-          fi
-
       - name: Verify installation
         run: |
           make --version
