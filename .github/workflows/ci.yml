@@ -10,7 +10,7 @@ on:
 jobs:
   shellcheck:
     name: ShellCheck Validation
-    runs-on: macos-latest
+    runs-on: macos-13
     
     steps:
       - name: Checkout code
@@ -29,7 +29,7 @@ jobs:
 
   build-validation:
     name: Build Process Validation
-    runs-on: macos-latest
+    runs-on: macos-13
     
     steps:
       - name: Checkout code
@@ -48,7 +48,7 @@ jobs:
 
   testing-framework:
     name: Testing Framework Validation
-    runs-on: macos-latest
+    runs-on: macos-13
     
     steps:
       - name: Checkout code
@@ -62,7 +62,7 @@ jobs:
 
   security-scan:
     name: Security Scanning
-    runs-on: macos-latest
+    runs-on: macos-13
     
     steps:
       - name: Checkout code
@@ -76,7 +76,7 @@ jobs:
 
   integration-test:
     name: Integration Testing
-    runs-on: macos-latest
+    runs-on: macos-13
     needs: [shellcheck, build-validation, testing-framework, security-scan]
     
     steps:
@@ -91,7 +91,7 @@ jobs:
 
   documentation-check:
     name: Documentation Validation
-    runs-on: macos-latest
+    runs-on: macos-13
     
     steps:
       - name: Checkout code
@@ -105,7 +105,7 @@ jobs:
 
   summary:
     name: Pipeline Summary
-    runs-on: macos-latest
+    runs-on: macos-13
     needs: [shellcheck, build-validation, testing-framework, security-scan, integration-test, documentation-check]
     if: always()
     
