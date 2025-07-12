@@ -62,14 +62,7 @@ install_dependencies() {
             # macOS CI environment
             print_info "Detected macOS CI environment"
             
-            # Install Homebrew if not present
-            if ! command -v brew > /dev/null 2>&1; then
-                print_info "Installing Homebrew..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-            fi
-            
-            # Install required packages
+            # Install required packages with Homebrew
             brew install \
                 make \
                 xz \

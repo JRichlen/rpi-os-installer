@@ -33,19 +33,10 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # Install Homebrew if not present
-          if ! command -v brew > /dev/null 2>&1; then
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-          fi
-          
-          # Install required packages
+          # Install required packages with Homebrew
           brew install \
             make \
             qemu \
-            parted \
-            dosfstools \
-            e2fsprogs \
             xz \
             unzip \
             wget \
@@ -55,22 +46,21 @@ jobs:
             cpio \
             gzip \
             rsync \
-            util-linux \
             jq
 
       - name: Install Docker (for testing containers)
         run: |
-          # Docker Desktop is usually pre-installed on macOS GitHub runners
-          # If not available, install Docker Desktop
-          if ! command -v docker > /dev/null 2>&1; then
-            echo "Docker not found - installing Docker Desktop"
-            brew install --cask docker
-            # Start Docker Desktop
+          # Docker Desktop is pre-installed on macOS GitHub runners
+          # Just verify it's available and start if needed
+          if ! docker info > /dev/null 2>&1; then
+            echo "Starting Docker Desktop..."
             open -a Docker
             # Wait for Docker to start
-            while ! docker info > /dev/null 2>&1; do
-              echo "Waiting for Docker to start..."
+            timeout=60
+            while ! docker info > /dev/null 2>&1 && [ $timeout -gt 0 ]; do
+              echo "Waiting for Docker to start... ($timeout seconds remaining)"
               sleep 5
+              timeout=$((timeout - 5))
             done
           fi
 
