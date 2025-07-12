@@ -35,30 +35,63 @@ install_dependencies() {
     print_info "Installing system dependencies..."
     
     if [[ "${CI:-}" == "true" ]]; then
-        # CI environment (Ubuntu)
-        sudo apt-get update
-        sudo apt-get install -y \
-            build-essential \
-            make \
-            parted \
-            dosfstools \
-            e2fsprogs \
-            xz-utils \
-            unzip \
-            wget \
-            curl \
-            git \
-            cpio \
-            gzip \
-            rsync \
-            fdisk \
-            util-linux \
-            kpartx \
-            jq
+        # Detect OS in CI environment
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            # Linux CI environment (Ubuntu)
+            print_info "Detected Linux CI environment"
+            sudo apt-get update
+            sudo apt-get install -y \
+                build-essential \
+                make \
+                parted \
+                dosfstools \
+                e2fsprogs \
+                xz-utils \
+                unzip \
+                wget \
+                curl \
+                git \
+                cpio \
+                gzip \
+                rsync \
+                fdisk \
+                util-linux \
+                kpartx \
+                jq
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS CI environment
+            print_info "Detected macOS CI environment"
+            
+            # Install Homebrew if not present
+            if ! command -v brew > /dev/null 2>&1; then
+                print_info "Installing Homebrew..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            fi
+            
+            # Install required packages
+            brew install \
+                make \
+                xz \
+                git \
+                cpio \
+                jq \
+                wget \
+                curl \
+                gzip \
+                rsync || true
+        else
+            print_info "Unknown CI environment OS: $OSTYPE"
+        fi
     else
-        # Local environment (macOS)
-        print_info "Local environment detected - ensure dependencies are installed"
-        print_info "Run: brew install make xz git cpio jq"
+        # Local environment
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Local macOS environment detected - ensure dependencies are installed"
+            print_info "Run: brew install make xz git cpio jq"
+        else
+            print_info "Local Linux environment detected - ensure dependencies are installed"
+            print_info "Install required packages with your package manager"
+        fi
     fi
 }
 

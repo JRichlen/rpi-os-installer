@@ -14,7 +14,7 @@ on:
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
-    runs-on: macos-latest-xlarge
+    runs-on: macos-latest
 
     # Set the permissions to the lowest permissions possible needed for your steps.
     # Copilot will be given its own token for its operations.
@@ -33,17 +33,20 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
+          # Install Homebrew if not present
+          if ! command -v brew > /dev/null 2>&1; then
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+          fi
+          
+          # Install required packages
+          brew install \
             make \
-            qemu-system-arm \
-            qemu-user-static \
-            binfmt-support \
+            qemu \
             parted \
             dosfstools \
             e2fsprogs \
-            xz-utils \
+            xz \
             unzip \
             wget \
             curl \
@@ -52,28 +55,34 @@ jobs:
             cpio \
             gzip \
             rsync \
-            fdisk \
             util-linux \
-            kpartx
+            jq
 
       - name: Install Docker (for testing containers)
         run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
-          sudo usermod -aG docker $USER
-          # Clean up installation script
-          rm -f get-docker.sh
+          # Docker Desktop is usually pre-installed on macOS GitHub runners
+          # If not available, install Docker Desktop
+          if ! command -v docker > /dev/null 2>&1; then
+            echo "Docker not found - installing Docker Desktop"
+            brew install --cask docker
+            # Start Docker Desktop
+            open -a Docker
+            # Wait for Docker to start
+            while ! docker info > /dev/null 2>&1; do
+              echo "Waiting for Docker to start..."
+              sleep 5
+            done
+          fi
 
       - name: Verify installation
         run: |
           make --version
-          qemu-system-arm --version
-          sudo docker --version
+          qemu-system-aarch64 --version
+          docker --version
           shellcheck --version
           xz --version
-          parted --version
-          losetup --version
-          kpartx -h || true
+          # parted --version  # May not be available on macOS
+          # diskutil info / | head -5  # macOS disk utility instead
 
       - name: Create required directories
         run: |
@@ -83,5 +92,5 @@ jobs:
 
       - name: Set up shell environment
         run: |
-          echo "export PATH=/usr/local/bin:\$PATH" >> ~/.bashrc
-          echo "alias ll='ls -la'" >> ~/.bashrc
+          echo "export PATH=/opt/homebrew/bin:\$PATH" >> ~/.zshrc
+          echo "alias ll='ls -la'" >> ~/.zshrc
