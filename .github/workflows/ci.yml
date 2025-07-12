@@ -34,7 +34,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
+      - name: Install shellcheck
+        run: |
+          echo "Installing ShellCheck..."
+          brew install shellcheck
+
       - name: Run build process validation
         run: |
           echo "Running build process validation..."
