@@ -100,7 +100,21 @@ if [[ ${#missing_tools[@]} -eq 0 ]]; then
     print_pass "All required testing tools available"
 else
     print_fail "Missing tools: ${missing_tools[*]}"
-    print_info "Install with: brew install ${missing_tools[*]}"
+    if [[ "${CI:-}" == "true" ]]; then
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            print_info "Install with: sudo apt-get install ${missing_tools[*]}"
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Install with: brew install ${missing_tools[*]}"
+        else
+            print_info "Install required tools with your package manager"
+        fi
+    else
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            print_info "Install with: brew install ${missing_tools[*]}"
+        else
+            print_info "Install with your package manager"
+        fi
+    fi
 fi
 
 # Test 7: Testing directory structure
@@ -166,6 +180,7 @@ if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
 fi
 
 echo "   • Native macOS testing (quickest)"
+echo "   • CI validation scripts (comprehensive)"
 
 echo ""
 echo "🚀 Quick start commands:"
@@ -176,4 +191,14 @@ echo "   make test-docker                   # Setup ARM64 environment"
 echo "   make test-docker-interactive       # Interactive ARM64 testing"
 
 echo ""
-echo "📖 See TESTING.md for detailed testing workflows"
+echo "� CI validation commands:"
+echo "   make ci-all                        # Run all CI checks"
+echo "   make ci-shellcheck                 # ShellCheck validation"
+echo "   make ci-build                      # Build process validation"
+echo "   make ci-security                   # Security scanning"
+echo "   make ci-testing                    # Testing framework validation"
+echo "   make ci-integration                # Integration testing"
+echo "   make ci-docs                       # Documentation validation"
+
+echo ""
+echo "�📖 See TESTING.md for detailed testing workflows"

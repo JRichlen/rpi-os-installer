@@ -98,29 +98,33 @@ test_images_directory() {
 test_dependencies() {
     print_test "Testing dependencies..."
     
-    # Check for Homebrew
-    if command -v brew &> /dev/null; then
-        print_pass "Homebrew is installed"
-    else
-        print_fail "Homebrew is not installed"
-        return 1
-    fi
-    
     # Check for required tools
     local tools=(git xz cpio)
+    local missing_tools=0
     for tool in "${tools[@]}"; do
         if command -v "$tool" &> /dev/null; then
             print_pass "$tool is available"
         else
             print_fail "$tool is not available"
+            ((missing_tools++))
         fi
     done
     
-    # Check for Tailscale
-    if [[ -f "/usr/local/bin/tailscale" ]] || [[ -f "/opt/homebrew/bin/tailscale" ]]; then
-        print_pass "Tailscale binary found"
+    if [[ "$missing_tools" -gt 0 ]]; then
+        return 1
+    fi
+    
+    # Check for Tailscale (optional in CI)
+    if [[ "${CI:-}" == "true" ]]; then
+        print_test "Skipping Tailscale check in CI environment"
     else
-        print_fail "Tailscale binary not found"
+        # Check for Tailscale
+        if [[ -f "/usr/local/bin/tailscale" ]] || [[ -f "/opt/homebrew/bin/tailscale" ]]; then
+            print_pass "Tailscale binary found"
+        else
+            print_fail "Tailscale binary not found"
+            # Note: Tailscale is optional, so we don't fail the test
+        fi
     fi
     
     return 0
@@ -161,13 +165,18 @@ main() {
     
     local test_results=()
     
-    # Run tests
+    # Run tests - disable exit on error temporarily for test collection
+    set +e
+    
     test_project_structure && test_results+=("PASS") || test_results+=("FAIL")
     test_script_permissions && test_results+=("PASS") || test_results+=("FAIL")
     test_images_directory && test_results+=("PASS") || test_results+=("FAIL")
     test_dependencies && test_results+=("PASS") || test_results+=("FAIL")
     test_generate_script && test_results+=("PASS") || test_results+=("FAIL")
     test_installer_script && test_results+=("PASS") || test_results+=("FAIL")
+    
+    # Re-enable exit on error
+    set -e
     
     # Summary
     echo

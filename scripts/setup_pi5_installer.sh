@@ -49,14 +49,19 @@ prompt_user() {
 # Function to read user input directly from terminal
 read_user_input() {
     local prompt="$1"
-    local var_name="$2"
+    local varname="$2"
+    local input_value
+    
     if [[ -t 0 ]]; then
         echo -n "$prompt" > /dev/tty
-        read -r "$var_name" < /dev/tty
+        read -r input_value < /dev/tty
     else
         echo -n "$prompt" >&2
-        read -r "$var_name" <&0
+        read -r input_value <&0
     fi
+    
+    # Use printf to assign the value to the variable name
+    printf -v "$varname" '%s' "$input_value"
 }
 
 # Function to check and install required tools
@@ -72,32 +77,44 @@ check_dependencies() {
         fi
     done
     
-    # Check for Tailscale binary
+    # Check for Tailscale binary (optional in CI)
     local tailscale_path=""
-    if [[ -f "/usr/local/bin/tailscale" ]]; then
-        tailscale_path="/usr/local/bin/tailscale"
-    elif [[ -f "/opt/homebrew/bin/tailscale" ]]; then
-        tailscale_path="/opt/homebrew/bin/tailscale"
+    if [[ "${CI:-}" == "true" ]]; then
+        print_status "Running in CI environment - skipping Tailscale check"
     else
-        print_error "Tailscale binary not found"
-        print_error "Please install Tailscale: brew install tailscale"
-        exit 1
+        if [[ -f "/usr/local/bin/tailscale" ]]; then
+            tailscale_path="/usr/local/bin/tailscale"
+        elif [[ -f "/opt/homebrew/bin/tailscale" ]]; then
+            tailscale_path="/opt/homebrew/bin/tailscale"
+        else
+            print_error "Tailscale binary not found"
+            print_error "Please install Tailscale: brew install tailscale"
+            exit 1
+        fi
+        
+        print_status "Found Tailscale at: $tailscale_path"
     fi
-    
-    print_status "Found Tailscale at: $tailscale_path"
     
     # Install missing tools
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         print_warning "Missing tools: ${missing_tools[*]}"
         print_status "Installing missing tools with Homebrew..."
         
-        if ! command -v brew &> /dev/null; then
+        # Check for Homebrew
+        local brew_cmd=""
+        if [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+            # Linux Homebrew
+            brew_cmd="/home/linuxbrew/.linuxbrew/bin/brew"
+        elif command -v brew &> /dev/null; then
+            # macOS Homebrew
+            brew_cmd="brew"
+        else
             print_error "Homebrew is required but not installed"
             print_error "Please install Homebrew: https://brew.sh/"
             exit 1
         fi
         
-        brew install "${missing_tools[@]}"
+        "$brew_cmd" install "${missing_tools[@]}"
     fi
     
     print_status "All dependencies satisfied"
@@ -225,6 +242,7 @@ select_os_image() {
         prompt_user "  $((i+1)). $(basename "${image_files[$i]}")"
     done
     
+    local selection
     read_user_input "Select image (1-${#image_files[@]}): " selection
     
     # Validate selection
@@ -299,6 +317,7 @@ handle_wifi_credentials() {
         read_user_input "Enter WiFi SSID: " wifi_ssid
     else
         print_status "Detected current WiFi network: $current_ssid"
+        local use_current
         read_user_input "Use this network? (y/n) [y]: " use_current
         if [[ "$use_current" == "n" || "$use_current" == "N" ]]; then
             read_user_input "Enter WiFi SSID: " wifi_ssid
@@ -400,7 +419,7 @@ build_initramfs() {
     
     # Download pre-built BusyBox for ARM64
     print_status "Downloading pre-built BusyBox for ARM64..."
-    local busybox_url="https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+    local busybox_url="https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox"
     if ! curl -L "$busybox_url" -o "$rootfs_dir/bin/busybox"; then
         print_error "Failed to download BusyBox binary"
         print_warning "Trying to create a minimal initramfs without BusyBox..."
@@ -514,13 +533,57 @@ fi
 
 echo "Found OS image: $(basename "$OS_IMAGE")"
 
-# Flash to NVMe
-TARGET_DEVICE="/dev/nvme0n1"
-if [ ! -b "$TARGET_DEVICE" ]; then
-    echo "ERROR: Target device $TARGET_DEVICE not found"
+# Function to detect target device
+detect_target_device() {
+    # Look for available storage devices (excluding the installer media)
+    local installer_device=""
+    local available_devices=""
+    
+    # Try to identify the installer media device
+    if mountpoint -q "$MEDIA_MOUNT"; then
+        installer_device=$(findmnt -n -o SOURCE "$MEDIA_MOUNT" | sed 's/[0-9]*$//')
+    fi
+    
+    # Look for block devices that could be targets
+    for device in /dev/nvme* /dev/sd* /dev/mmcblk*; do
+        if [ -b "$device" ] && [ "$device" != "$installer_device" ]; then
+            # Skip partition devices, only consider whole disks
+            if [[ "$device" =~ ^/dev/(nvme[0-9]+n[0-9]+|sd[a-z]+|mmcblk[0-9]+)$ ]]; then
+                available_devices="$available_devices $device"
+            fi
+        fi
+    done
+    
+    # Count available devices
+    device_count=$(echo "$available_devices" | wc -w)
+    
+    if [ "$device_count" -eq 0 ]; then
+        echo "ERROR: No suitable target devices found"
+        echo "Available devices must be different from installer media"
+        return 1
+    elif [ "$device_count" -eq 1 ]; then
+        echo "$available_devices" | tr -d ' '
+    else
+        echo "Multiple target devices found: $available_devices"
+        echo "Please specify which device to use"
+        return 1
+    fi
+}
+
+# Detect target device
+TARGET_DEVICE=$(detect_target_device)
+if [ $? -ne 0 ] || [ -z "$TARGET_DEVICE" ]; then
+    echo "ERROR: Could not determine target device"
+    echo "This installer requires exactly one target storage device"
+    echo "that is different from the installer media"
     /bin/sh
     exit 1
 fi
+
+echo "Target device detected: $TARGET_DEVICE"
+echo "WARNING: This will completely erase $TARGET_DEVICE"
+echo "Press Enter to continue or Ctrl+C to abort..."
+read -r
 
 echo "Flashing OS image to $TARGET_DEVICE..."
 xz -dc "$OS_IMAGE" | dd of="$TARGET_DEVICE" bs=4M status=progress
@@ -546,7 +609,13 @@ if [ -f "$SETUP_SCRIPT" ]; then
     fi
     
     chmod +x "$SETUP_SCRIPT"
-    "$SETUP_SCRIPT" "$MEDIA_MOUNT" "$TAILSCALE_KEY_CONTENT"
+    WIFI_SSID=""
+    WIFI_PASSWORD=""
+    if [ -f "$MEDIA_MOUNT/wifi.txt" ]; then
+        WIFI_SSID="$(head -1 "$MEDIA_MOUNT/wifi.txt")"
+        WIFI_PASSWORD="$(tail -1 "$MEDIA_MOUNT/wifi.txt")"
+    fi
+    "$SETUP_SCRIPT" "$MEDIA_MOUNT" "$TAILSCALE_KEY_CONTENT" "$WIFI_SSID" "$WIFI_PASSWORD" "$TARGET_DEVICE"
 else
     echo "WARNING: No setup script found for $OS_NAME"
 fi
@@ -686,8 +755,10 @@ copy_to_external_drive() {
     
     # Clear existing files from installation media to ensure clean setup
     print_status "Clearing existing files from installation media..."
-    rm -rf "$mount_point"/* 2>/dev/null || true
-    rm -rf "$mount_point"/.* 2>/dev/null || true
+    if [[ -n "$mount_point" && -d "$mount_point" ]]; then
+        rm -rf "${mount_point:?}"/* 2>/dev/null || true
+        rm -rf "${mount_point:?}"/.* 2>/dev/null || true
+    fi
     
     # Copy all files from dist to external drive
     print_status "Copying all files from dist to external drive..."
@@ -720,6 +791,12 @@ cleanup() {
 
 # Main function
 main() {
+    # Check for --check-deps-only flag
+    if [[ "$1" == "--check-deps-only" ]]; then
+        check_dependencies
+        exit 0
+    fi
+    
     print_status "Pi 5 Installer Setup"
     print_status "===================="
     
@@ -742,7 +819,7 @@ main() {
     # Clean dist directory if it exists
     if [[ -d "$DIST_DIR" ]]; then
         print_status "Cleaning dist directory..."
-        rm -rf "$DIST_DIR"/*
+        rm -rf "${DIST_DIR:?}"/*
     fi
     
     # Check dependencies

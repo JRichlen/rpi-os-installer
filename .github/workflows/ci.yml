@@ -1,0 +1,136 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck Validation
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          echo "Installing ShellCheck..."
+          brew install shellcheck
+        
+      - name: Run ShellCheck on all shell scripts
+        run: |
+          echo "Running ShellCheck validation..."
+          ./scripts/ci_shellcheck.sh
+          echo "✅ ShellCheck validation completed"
+
+  build-validation:
+    name: Build Process Validation
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          echo "Installing ShellCheck..."
+          brew install shellcheck
+
+      - name: Run build process validation
+        run: |
+          echo "Running build process validation..."
+          ./scripts/ci_build_validation.sh
+          echo "✅ Build process validation completed"
+
+  testing-framework:
+    name: Testing Framework Validation
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run testing framework validation
+        run: |
+          echo "Running testing framework validation..."
+          ./scripts/ci_testing_framework.sh
+          echo "✅ Testing framework validation completed"
+
+  security-scan:
+    name: Security Scanning
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run security scanning
+        run: |
+          echo "Running security scanning..."
+          ./scripts/ci_security_scan.sh
+          echo "✅ Security scanning completed"
+
+  integration-test:
+    name: Integration Testing
+    runs-on: macos-13
+    needs: [shellcheck, build-validation, testing-framework, security-scan]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run integration testing
+        run: |
+          echo "Running integration testing..."
+          ./scripts/ci_integration_test.sh
+          echo "✅ Integration testing completed"
+
+  documentation-check:
+    name: Documentation Validation
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run documentation validation
+        run: |
+          echo "Running documentation validation..."
+          ./scripts/ci_documentation_check.sh
+          echo "✅ Documentation validation completed"
+
+  summary:
+    name: Pipeline Summary
+    runs-on: macos-13
+    needs: [shellcheck, build-validation, testing-framework, security-scan, integration-test, documentation-check]
+    if: always()
+    
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "## CI Pipeline Summary"
+          echo "====================="
+          echo "✅ ShellCheck validation: ${{ needs.shellcheck.result }}"
+          echo "✅ Build process validation: ${{ needs.build-validation.result }}"
+          echo "✅ Testing framework validation: ${{ needs.testing-framework.result }}"
+          echo "✅ Security scanning: ${{ needs.security-scan.result }}"
+          echo "✅ Integration testing: ${{ needs.integration-test.result }}"
+          echo "✅ Documentation validation: ${{ needs.documentation-check.result }}"
+          echo ""
+          
+          # Check if all jobs succeeded
+          if [ "${{ needs.shellcheck.result }}" = "success" ] && \
+             [ "${{ needs.build-validation.result }}" = "success" ] && \
+             [ "${{ needs.testing-framework.result }}" = "success" ] && \
+             [ "${{ needs.security-scan.result }}" = "success" ] && \
+             [ "${{ needs.integration-test.result }}" = "success" ] && \
+             [ "${{ needs.documentation-check.result }}" = "success" ]; then
+            echo "🎉 All pipeline checks passed! The project is ready for production."
+          else
+            echo "❌ Some pipeline checks failed. Please review the failed jobs above."
+            exit 1
+          fi

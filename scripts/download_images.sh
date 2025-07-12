@@ -89,7 +89,31 @@ get_latest_haos_release() {
     local release_data
     if ! release_data=$(curl -s "$api_url"); then
         print_error "Failed to fetch Home Assistant OS release information" >&2
-        return 1
+        print_error "Falling back to known version..." >&2
+        # Fallback to a known working version
+        printf "https://github.com/home-assistant/operating-system/releases/download/16.0/haos_rpi5-64-16.0.img.xz|haos_rpi5-64-16.0.img.xz"
+        return 0
+    fi
+    
+    # Check if release_data is valid JSON and not empty
+    if ! echo "$release_data" | jq -e . > /dev/null 2>&1; then
+        print_error "Invalid JSON response from GitHub API" >&2
+        print_error "Response: $release_data" >&2
+        print_error "Falling back to known version..." >&2
+        # Fallback to a known working version
+        printf "https://github.com/home-assistant/operating-system/releases/download/16.0/haos_rpi5-64-16.0.img.xz|haos_rpi5-64-16.0.img.xz"
+        return 0
+    fi
+    
+    # Check if assets array exists and is not empty
+    local assets_count
+    assets_count=$(echo "$release_data" | jq '.assets | length // 0')
+    if [[ "$assets_count" -eq 0 ]]; then
+        print_error "No assets found in latest release" >&2
+        print_error "Falling back to known version..." >&2
+        # Fallback to a known working version
+        printf "https://github.com/home-assistant/operating-system/releases/download/16.0/haos_rpi5-64-16.0.img.xz|haos_rpi5-64-16.0.img.xz"
+        return 0
     fi
     
     local download_url
@@ -97,7 +121,12 @@ get_latest_haos_release() {
     
     if [[ -z "$download_url" || "$download_url" == "null" ]]; then
         print_error "Could not find RPi5 image in latest release" >&2
-        return 1
+        print_error "Available assets:" >&2
+        echo "$release_data" | jq -r '.assets[].name' >&2
+        print_error "Falling back to known version..." >&2
+        # Fallback to a known working version
+        printf "https://github.com/home-assistant/operating-system/releases/download/16.0/haos_rpi5-64-16.0.img.xz|haos_rpi5-64-16.0.img.xz"
+        return 0
     fi
     
     local filename
@@ -227,7 +256,6 @@ main() {
     # Parse command line arguments
     local download_haos=false
     local download_ubuntu=false
-    local auto_download=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -245,7 +273,6 @@ main() {
                 shift
                 ;;
             --auto)
-                auto_download=true
                 download_haos=true
                 download_ubuntu=true
                 shift

@@ -1,6 +1,6 @@
 # Pi 5 Installer Makefile
 
-.PHONY: help setup generate install clean download-images check-deps test-setup test-qemu test-qemu-interactive test-qemu-clean test-docker test-docker-interactive test-docker-clean validate
+.PHONY: help setup generate install clean download-images check-deps test-setup test-qemu test-qemu-interactive test-qemu-clean test-docker test-docker-interactive test-docker-clean validate ci-all ci-shellcheck ci-build ci-security ci-testing ci-integration ci-docs
 
 # Default target
 help:
@@ -23,6 +23,24 @@ help:
 	@echo "  test-docker    - Setup Docker ARM64 testing environment"
 	@echo "  test-docker-interactive - Run interactive Docker Pi simulation"
 	@echo "  test-docker-clean - Clean Docker test environment"
+	@echo ""
+	@echo "CI Commands:"
+	@echo "  ci-all         - Run all CI checks"
+	@echo "  ci-shellcheck  - Run ShellCheck validation"
+	@echo "  ci-build       - Run build process validation"
+	@echo "  ci-security    - Run security scanning"
+	@echo "  ci-testing     - Run testing framework validation"
+	@echo "  ci-integration - Run integration testing"
+	@echo "  ci-docs        - Run documentation validation"
+	@echo ""
+	@echo "CI Commands:"
+	@echo "  ci-all         - Run all CI checks"
+	@echo "  ci-shellcheck  - Run ShellCheck validation"
+	@echo "  ci-build       - Run build process validation"
+	@echo "  ci-security    - Run security scanning"
+	@echo "  ci-testing     - Run testing framework validation"
+	@echo "  ci-integration - Run integration testing"
+	@echo "  ci-docs        - Run documentation validation"
 
 # Check dependencies
 check-deps:
@@ -102,3 +120,32 @@ test-docker-clean:
 validate:
 	@echo "Validating testing setup..."
 	@scripts/validate_tests.sh
+
+# CI checks
+ci-all:
+	@echo "Running all CI checks..."
+	@scripts/ci_run_all.sh
+
+ci-shellcheck:
+	@echo "Running ShellCheck validation..."
+	@scripts/ci_shellcheck.sh
+
+ci-build:
+	@echo "Running build process validation..."
+	@scripts/ci_build_validation.sh
+
+ci-security:
+	@echo "Running security scanning..."
+	@scripts/ci_security_scan.sh
+
+ci-testing:
+	@echo "Running testing framework validation..."
+	@scripts/ci_testing_framework.sh
+
+ci-integration:
+	@echo "Running integration testing..."
+	@scripts/ci_integration_test.sh
+
+ci-docs:
+	@echo "Running documentation validation..."
+	@scripts/ci_documentation_check.sh

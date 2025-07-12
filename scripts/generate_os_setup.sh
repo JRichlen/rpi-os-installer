@@ -56,7 +56,7 @@ generate_haos_setup() {
 #!/bin/bash
 
 # Auto-generated HAOS setup script
-# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password> <target_device>
 
 set -euo pipefail
 
@@ -64,6 +64,7 @@ MEDIA_ROOT="$1"
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
 WIFI_PASSWORD="$4"
+TARGET_DEVICE="$5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -75,11 +76,27 @@ print_status() {
     echo -e "${GREEN}[HAOS-SETUP]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[HAOS-SETUP]${NC} $1"
+}
+
 print_error() {
     echo -e "${RED}[HAOS-SETUP]${NC} $1" >&2
 }
 
 print_status "Starting Home Assistant OS setup..."
+
+# Function to get correct partition name
+get_partition_name() {
+    local device="$1"
+    local partition_num="$2"
+    
+    if [[ "$device" == *"nvme"* ]]; then
+        echo "${device}p${partition_num}"
+    else
+        echo "${device}${partition_num}"
+    fi
+}
 
 # Mount points
 BOOT_MOUNT="/tmp/haos_boot"
@@ -100,8 +117,8 @@ trap cleanup EXIT
 
 # Create additional data partition for user data if space available
 print_status "Checking for additional disk space..."
-DISK_SIZE=$(parted /dev/nvme0n1 unit MB print | grep "Disk /dev/nvme0n1:" | awk '{print $3}' | sed 's/MB//')
-LAST_PARTITION_END=$(parted /dev/nvme0n1 unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
+DISK_SIZE=$(parted "$TARGET_DEVICE" unit MB print | grep "Disk $TARGET_DEVICE:" | awk '{print $3}' | sed 's/MB//')
+LAST_PARTITION_END=$(parted "$TARGET_DEVICE" unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
 
 # Reserve 20% or minimum 4GB for future OS versions, whichever is larger
 RESERVED_MB=$((DISK_SIZE / 5))  # 20% of disk
@@ -119,18 +136,18 @@ if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
     END_POSITION=$((DISK_SIZE - RESERVED_MB))
     
     # Get next available partition number
-    NEXT_PARTITION=$(parted /dev/nvme0n1 print | grep "^ " | tail -n 1 | awk '{print $1+1}')
+    NEXT_PARTITION=$(parted "$TARGET_DEVICE" print | grep "^ " | tail -n 1 | awk '{print $1+1}')
     
     # Create new partition using available space (not all remaining space)
-    parted /dev/nvme0n1 mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
+    parted "$TARGET_DEVICE" mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
     
     # Wait for partition to be created
     sleep 2
-    partprobe /dev/nvme0n1 || true
+    partprobe "$TARGET_DEVICE" || true
     sleep 2
     
     # Format the new partition
-    NEW_PARTITION="/dev/nvme0n1p${NEXT_PARTITION}"
+    NEW_PARTITION="$(get_partition_name "$TARGET_DEVICE" "$NEXT_PARTITION")"
     if [[ -b "$NEW_PARTITION" ]]; then
         print_status "Formatting new data partition $NEW_PARTITION..."
         mkfs.ext4 -F "$NEW_PARTITION" 2>/dev/null || true
@@ -170,12 +187,12 @@ fi
 
 # Mount the flashed partitions
 print_status "Mounting HAOS partitions..."
-if ! mount /dev/nvme0n1p1 "$BOOT_MOUNT"; then
+if ! mount "$(get_partition_name "$TARGET_DEVICE" "1")" "$BOOT_MOUNT"; then
     print_error "Failed to mount HAOS boot partition"
     exit 1
 fi
 
-if ! mount /dev/nvme0n1p8 "$DATA_MOUNT"; then
+if ! mount "$(get_partition_name "$TARGET_DEVICE" "8")" "$DATA_MOUNT"; then
     print_error "Failed to mount HAOS data partition"
     exit 1
 fi
@@ -198,6 +215,7 @@ if [[ -d "$MEDIA_ROOT/haos-tailscale-addon" ]]; then
     cp -r "$MEDIA_ROOT/haos-tailscale-addon"/* "$ADDON_DIR/"
     
     # Create options.json with the auth key
+    # TODO: Review secure handling of Tailscale auth keys
     cat > "$ADDON_DIR/options.json" << EOL
 {
   "auth_key": "$TAILSCALE_KEY_CONTENT"
@@ -287,14 +305,16 @@ generate_ubuntu_setup() {
 #!/bin/bash
 
 # Auto-generated Ubuntu setup script
-# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password>
+# Args: <media_root> <tailscale_key_content> <wifi_ssid> <wifi_password> <target_device>
 
 set -euo pipefail
 
-MEDIA_ROOT="$1"
+# shellcheck disable=SC2034  # Variable reserved for future use
+MEDIA_ROOT="$1"    # Reserved for future use - installer media root
 TAILSCALE_KEY_CONTENT="$2"
 WIFI_SSID="$3"
 WIFI_PASSWORD="$4"
+TARGET_DEVICE="$5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -306,11 +326,27 @@ print_status() {
     echo -e "${GREEN}[UBUNTU-SETUP]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[UBUNTU-SETUP]${NC} $1"
+}
+
 print_error() {
     echo -e "${RED}[UBUNTU-SETUP]${NC} $1" >&2
 }
 
 print_status "Starting Ubuntu Server setup..."
+
+# Function to get correct partition name
+get_partition_name() {
+    local device="$1"
+    local partition_num="$2"
+    
+    if [[ "$device" == *"nvme"* ]]; then
+        echo "${device}p${partition_num}"
+    else
+        echo "${device}${partition_num}"
+    fi
+}
 
 # Mount points
 BOOT_MOUNT="/tmp/ubuntu_boot"
@@ -331,8 +367,8 @@ trap cleanup EXIT
 
 # Create additional data partition for user data if space available
 print_status "Checking for additional disk space..."
-DISK_SIZE=$(parted /dev/nvme0n1 unit MB print | grep "Disk /dev/nvme0n1:" | awk '{print $3}' | sed 's/MB//')
-LAST_PARTITION_END=$(parted /dev/nvme0n1 unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
+DISK_SIZE=$(parted "$TARGET_DEVICE" unit MB print | grep "Disk $TARGET_DEVICE:" | awk '{print $3}' | sed 's/MB//')
+LAST_PARTITION_END=$(parted "$TARGET_DEVICE" unit MB print | tail -n 1 | awk '{print $3}' | sed 's/MB//')
 
 # Reserve 20% or minimum 4GB for future OS versions, whichever is larger
 RESERVED_MB=$((DISK_SIZE / 5))  # 20% of disk
@@ -350,18 +386,18 @@ if (( AVAILABLE_MB > 1024 )); then  # Only create if >1GB available
     END_POSITION=$((DISK_SIZE - RESERVED_MB))
     
     # Get next available partition number
-    NEXT_PARTITION=$(parted /dev/nvme0n1 print | grep "^ " | tail -n 1 | awk '{print $1+1}')
+    NEXT_PARTITION=$(parted "$TARGET_DEVICE" print | grep "^ " | tail -n 1 | awk '{print $1+1}')
     
     # Create new partition using available space (not all remaining space)
-    parted /dev/nvme0n1 mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
+    parted "$TARGET_DEVICE" mkpart primary ext4 "${LAST_PARTITION_END}MB" "${END_POSITION}MB" 2>/dev/null || true
     
     # Wait for partition to be created
     sleep 2
-    partprobe /dev/nvme0n1 || true
+    partprobe "$TARGET_DEVICE" || true
     sleep 2
     
     # Format the new partition
-    NEW_PARTITION="/dev/nvme0n1p${NEXT_PARTITION}"
+    NEW_PARTITION="$(get_partition_name "$TARGET_DEVICE" "$NEXT_PARTITION")"
     if [[ -b "$NEW_PARTITION" ]]; then
         print_status "Formatting new data partition $NEW_PARTITION..."
         mkfs.ext4 -F "$NEW_PARTITION" 2>/dev/null || true
@@ -415,12 +451,12 @@ fi
 
 # Mount the flashed partitions
 print_status "Mounting Ubuntu partitions..."
-if ! mount /dev/nvme0n1p1 "$BOOT_MOUNT"; then
+if ! mount "$(get_partition_name "$TARGET_DEVICE" "1")" "$BOOT_MOUNT"; then
     print_error "Failed to mount Ubuntu boot partition"
     exit 1
 fi
 
-if ! mount /dev/nvme0n1p2 "$ROOT_MOUNT"; then
+if ! mount "$(get_partition_name "$TARGET_DEVICE" "2")" "$ROOT_MOUNT"; then
     print_error "Failed to mount Ubuntu root partition"
     exit 1
 fi
@@ -624,9 +660,13 @@ main() {
     
     # Process each image file
     for image_file in "${image_files[@]}"; do
-        local filename="$(basename "$image_file")"
-        local basename="${filename%.img.xz}"
-        local os_type="$(detect_os_type "$filename")"
+        local filename
+        local basename
+        local os_type
+        
+        filename="$(basename "$image_file")"
+        basename="${filename%.img.xz}"
+        os_type="$(detect_os_type "$filename")"
         
         print_status "Processing $filename (detected as: $os_type)"
         
