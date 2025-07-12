@@ -98,29 +98,6 @@ test_images_directory() {
 test_dependencies() {
     print_test "Testing dependencies..."
     
-    # Check if running in CI environment
-    if [[ "${CI:-}" == "true" ]]; then
-        print_test "Running in CI environment - checking for Linux Homebrew..."
-        
-        # Check for Linux Homebrew
-        if [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-            print_pass "Homebrew is installed (Linux)"
-            # Set up Homebrew environment
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-        else
-            print_fail "Homebrew is not installed in CI"
-            return 1
-        fi
-    else
-        # Check for macOS Homebrew
-        if command -v brew &> /dev/null; then
-            print_pass "Homebrew is installed"
-        else
-            print_fail "Homebrew is not installed"
-            return 1
-        fi
-    fi
-    
     # Check for required tools
     local tools=(git xz cpio)
     local missing_tools=0
