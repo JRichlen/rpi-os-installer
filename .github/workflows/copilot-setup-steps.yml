@@ -48,6 +48,11 @@ jobs:
             rsync \
             jq
 
+      - name: Install Colima and Docker CLI
+        run: |
+          brew install docker colima
+          colima start
+
       - name: Verify installation
         run: |
           make --version
